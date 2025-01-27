@@ -1,0 +1,478 @@
+#!/bin/bash
+
+# Configuration
+ENDPOINT_URL="insert automation url here"
+COLLECTIONS_DIR="postman_collections"
+ITEMS_DIR="${COLLECTIONS_DIR}/items"
+
+# Get repo name with error handling
+REMOTE_URL=$(git config --get remote.origin.url || echo "default_repo")
+if [ -n "$REMOTE_URL" ] && [ "$REMOTE_URL" != "default_repo" ]; then
+    REPO_NAME=$(basename -s .git "$REMOTE_URL")
+else
+    REPO_NAME="api_reference"
+fi
+MAIN_COLLECTION="${COLLECTIONS_DIR}/${REPO_NAME}_api_reference.json"
+
+# Create necessary directories
+mkdir -p "$ITEMS_DIR"
+
+# Add postman_collections to .git/info/exclude if not already present
+EXCLUDE_FILE=".git/info/exclude"
+if [ -f "$EXCLUDE_FILE" ] && ! grep -q "^postman_collections/" "$EXCLUDE_FILE"; then
+    echo "postman_collections/" >> "$EXCLUDE_FILE"
+fi
+
+# Initialize main collection if it doesn't exist
+if [ ! -f "$MAIN_COLLECTION" ]; then
+    cat > "$MAIN_COLLECTION" << EOF
+{
+  "info": {
+    "name": "${REPO_NAME} API Reference",
+    "description": {
+      "content": "API endpoints documentation",
+      "type": "text/plain"
+    },
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": []
+}
+EOF
+fi
+
+# Create temporary files for storing data
+TEMP_DIR=$(mktemp -d)
+DIFF_FILE="$TEMP_DIR/diff.txt"
+PAYLOAD_FILE="$TEMP_DIR/payload.json"
+
+# Get commit information with error handling
+COMMIT_HASH=$(git rev-parse HEAD 2>/dev/null || echo "")
+if [ -z "$COMMIT_HASH" ]; then
+    echo "Error: Could not get commit hash"
+    exit 1
+fi
+
+# Handle first commit case differently
+if git rev-parse HEAD^1 >/dev/null 2>&1; then
+    # Not first commit
+    PARENT_HASH=$(git rev-parse HEAD^1)
+    git diff "$PARENT_HASH" "$COMMIT_HASH" > "$DIFF_FILE"
+else
+    # First commit
+    PARENT_HASH=$(git hash-object -t tree /dev/null)
+    # For first commit, get the full diff of everything
+    git show --pretty=format: --patch "$COMMIT_HASH" > "$DIFF_FILE" || true
+fi
+
+PARENT_HASH=$(git rev-parse HEAD^ 2>/dev/null || echo "")
+if [ -z "$PARENT_HASH" ]; then
+    # Handle first commit case
+    PARENT_HASH=$(git hash-object -t tree /dev/null)
+fi
+
+COMMIT_MSG=$(git log -1 --pretty=%B)
+AUTHOR_NAME=$(git log -1 --pretty=format:'%an')
+AUTHOR_EMAIL=$(git log -1 --pretty=format:'%ae')
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "master")
+TIMESTAMP=$(git log -1 --pretty=format:'%ct')
+
+# Save diff to temporary file with error handling
+if ! git diff "$PARENT_HASH" "$COMMIT_HASH" > "$DIFF_FILE"; then
+    echo "Error: Could not generate diff"
+    exit 1
+fi
+
+# Update the payload generation part:
+python3 << EOF
+import json
+import subprocess
+import os
+import sys
+from pathlib import Path
+
+def normalize_url(url):
+    """Normalize URL by removing host, api version prefix and query parameters."""
+    # Remove query parameters
+    url = url.split('?')[0]
+    
+    # Remove https://{link} prefix if present
+    if 'https://' in url:
+        parts = url.split('/', 3)
+        url = parts[-1] if len(parts) > 3 else url
+    
+    # Remove /api/v1 prefix if present
+    if url.startswith('/api/v1/'):
+        url = url[8:]  # Remove '/api/v1/'
+    elif url.startswith('/api/'):
+        url = url[5:]  # Remove '/api/'
+    elif url.startswith('api/v1/'):
+        url = url[7:]  # Remove 'api/v1/'
+    elif url.startswith('api/'):
+        url = url[4:]  # Remove 'api/'
+    
+    # Ensure URL starts with /
+    if not url.startswith('/'):
+        url = '/' + url
+        
+    return url
+
+# Function to check if this is the first commit
+def is_first_commit():
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "HEAD^1"],
+            capture_output=True,
+            check=True
+        )
+        return False
+    except subprocess.CalledProcessError:
+        return True
+
+# Function to safely read file content
+def safe_read_file(commit_hash, filepath):
+    try:
+        if not filepath:
+            return ""
+        # For first commit, read directly from filesystem
+        if is_first_commit():
+            try:
+                with open(filepath, 'r') as f:
+                    return f.read()
+            except:
+                return ""
+        else:
+            result = subprocess.run(
+                ["git", "show", f"{commit_hash}:{filepath}"],
+                capture_output=True,
+                text=True
+            )
+            return result.stdout if result.returncode == 0 else ""
+    except Exception as e:
+        print(f"Error reading file {filepath}: {str(e)}", file=sys.stderr)
+        return ""
+
+# Get changed files
+changed_files = []
+if is_first_commit():
+    # For first commit, get all files
+    for root, _, files in os.walk("."):
+        for file in files:
+            if not file.startswith('.') and root.startswith('./src'):
+                filepath = os.path.join(root, file)[2:]  # Remove './'
+                file_info = {
+                    "path": filepath,
+                    "status": "Added",
+                    "content": safe_read_file("$COMMIT_HASH", filepath)
+                }
+                changed_files.append(file_info)
+else:
+    # For subsequent commits
+    git_status = subprocess.run(
+        ["git", "diff-tree", "--no-commit-id", "--name-status", "-r", "$COMMIT_HASH"],
+        capture_output=True,
+        text=True
+    )
+
+# Get current endpoints from metadata if it exists
+metadata_path = os.path.join("$COLLECTIONS_DIR", "collection_metadata.json")
+current_endpoints = []
+
+if os.path.exists(metadata_path):
+    try:
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+            endpoints = metadata.get('endpoints', {})
+            for key, endpoint in endpoints.items():
+                # Create endpoint object in the format expected by the API
+                current_endpoints.append({
+                    'method': endpoint['method'],
+                    'url': endpoint['url'],
+                    'name': endpoint['name']
+                })
+    except Exception as e:
+        print(f"Warning: Could not read metadata file: {str(e)}", file=sys.stderr)
+
+# Get changed files
+changed_files = []
+git_status = subprocess.run(
+    ["git", "diff-tree", "--no-commit-id", "--name-status", "-r", "$COMMIT_HASH"],
+    capture_output=True,
+    text=True
+)
+
+for line in git_status.stdout.splitlines():
+    if not line.strip():
+        continue
+    
+    status, *filepath = line.split()
+    filepath = " ".join(filepath).strip()
+    
+    status_map = {
+        "A": "Added",
+        "M": "Modified",
+        "D": "Deleted"
+    }
+    
+    file_info = {
+        "path": filepath,
+        "status": status_map.get(status, status)
+    }
+    
+    if status != "D":
+        file_info["content"] = safe_read_file("$COMMIT_HASH", filepath)
+    else:
+        file_info["content"] = ""
+    
+    changed_files.append(file_info)
+
+# Read the diff file
+with open("$DIFF_FILE", 'r') as f:
+    diff_content = f.read()
+
+# Create the payload with current endpoints
+payload = {
+    "hash": "$COMMIT_HASH",
+    "parentHash": "$PARENT_HASH",
+    "message": "$COMMIT_MSG",
+    "author": {
+        "name": "$AUTHOR_NAME",
+        "email": "$AUTHOR_EMAIL"
+    },
+    "branch": "$BRANCH_NAME",
+    "timestamp": int("$TIMESTAMP"),
+    "changedFiles": changed_files,
+    "diff": diff_content,
+    "currentEndpoints": current_endpoints
+}
+
+# Write payload to file
+with open("$PAYLOAD_FILE", 'w') as f:
+    json.dump(payload, f, indent=2)
+
+# Print summary of endpoints being sent
+print("\nℹ️ Current endpoints being sent to API:")
+for endpoint in current_endpoints:
+    print(f"  {endpoint['method']} {endpoint['url']}")
+EOF
+
+# Send the HTTP POST request using the saved payload
+echo "Sending payload to $ENDPOINT_URL"
+RESPONSE=$(curl -X POST "$ENDPOINT_URL" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d @"$PAYLOAD_FILE" \
+    --fail \
+    --silent \
+    --show-error \
+    2>&1)
+
+# Save response to a temporary file
+RESPONSE_FILE="$TEMP_DIR/response.json"
+echo "$RESPONSE" > "$RESPONSE_FILE"
+
+# Check if the response is valid JSON before processing
+if ! python3 -c "import json; json.load(open('$RESPONSE_FILE'));" 2>/dev/null; then
+    echo "❌ Invalid JSON response:"
+    cat "$RESPONSE_FILE"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# Process and save the response
+python3 << EOF
+import json
+import os
+import re
+import sys
+from datetime import datetime
+
+def normalize_url(url):
+    """Normalize URL by removing host, api version prefix and query parameters."""
+    # Remove query parameters
+    url = url.split('?')[0]
+    
+    # Remove https://{link} prefix if present
+    if 'https://' in url:
+        parts = url.split('/', 3)
+        url = parts[-1] if len(parts) > 3 else url
+    
+    # Remove /api/v1 prefix if present
+    if url.startswith('/api/v1/'):
+        url = url[8:]  # Remove '/api/v1/'
+    elif url.startswith('/api/'):
+        url = url[5:]  # Remove '/api/'
+    elif url.startswith('api/v1/'):
+        url = url[7:]  # Remove 'api/v1/'
+    elif url.startswith('api/'):
+        url = url[4:]  # Remove 'api/'
+    
+    # Ensure URL starts with /
+    if not url.startswith('/'):
+        url = '/' + url
+        
+    return url
+
+def sanitize_filename(name):
+    # Remove or replace invalid filename characters
+    name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    # Convert spaces to underscores
+    name = name.replace(' ', '_')
+    # Convert to lowercase for consistency
+    return name.lower()
+
+# Update just the response processing part:
+try:
+    # Read response from file
+    with open('$RESPONSE_FILE', 'r') as f:
+        response = json.load(f)
+    
+    # Extract new items from response
+    new_items = []
+    if isinstance(response, dict) and 'output' in response:
+        new_items = response['output'].get('item', [])
+    elif isinstance(response, list) and len(response) > 0:
+        new_items = response[0]['output'].get('item', [])
+    
+    if not new_items:
+        print("⚠️ No items found in response")
+        print("Response structure:", json.dumps(response, indent=2))
+        sys.exit(1)
+
+    # Read existing metadata if it exists
+    metadata_path = os.path.join("$COLLECTIONS_DIR", "collection_metadata.json")
+    existing_endpoints = {}
+    if os.path.exists(metadata_path):
+        with open(metadata_path, 'r') as f:
+            try:
+                metadata = json.load(f)
+                existing_endpoints = metadata.get('endpoints', {})
+            except json.JSONDecodeError:
+                print("⚠️ Error reading metadata, starting fresh")
+
+    # Read existing main collection
+    current_items = []
+    if os.path.exists("$MAIN_COLLECTION"):
+        with open("$MAIN_COLLECTION", 'r') as f:
+            try:
+                main_collection = json.load(f)
+                current_items = main_collection.get('item', [])
+            except json.JSONDecodeError:
+                print("⚠️ Error reading main collection, starting fresh")
+
+    # Create lookup of existing items by method+URL only
+    existing_items = {}
+    endpoint_lookup = {}
+    for item in current_items:
+        method = item.get('request', {}).get('method', '')
+        original_url = item.get('request', {}).get('url', '')
+        url = normalize_url(original_url)
+        key = f"{method}:{url}"  # Using normalized URL for key
+        existing_items[key] = item
+        endpoint_lookup[key] = {
+            'method': method,
+            'url': url,  # Use normalized URL in metadata
+            'name': item['name'],
+            'lastUpdated': metadata.get('endpoints', {}).get(key, {}).get('lastUpdated', datetime.now().isoformat())
+        }
+
+    # Process new items
+    final_items = existing_items.copy()
+    updated_endpoints = existing_endpoints.copy()  # Start with existing endpoints
+
+    for item in new_items:
+        method = item.get('request', {}).get('method', '')
+        original_url = item.get('request', {}).get('url', '')
+        normalized_url = normalize_url(original_url)
+        key = f"{method}:{normalized_url}"
+        
+        # Create safe filename
+        timestamp = int(datetime.now().timestamp())
+        safe_name = sanitize_filename(item['name'])
+        filename = f"item_{timestamp}_{safe_name}.json"
+        item_path = os.path.join("$ITEMS_DIR", filename)
+        
+        # Save individual item
+        with open(item_path, 'w') as f:
+            json.dump(item, f, indent=2)
+        
+        if key in final_items:
+            old_name = final_items[key]['name']
+            if old_name != item['name']:
+                print(f"ℹ️ Updating endpoint {method} {original_url} (name changed from '{old_name}' to '{item['name']}')")
+            else:
+                print(f"ℹ️ Updating endpoint: {method} {original_url}")
+        else:
+            print(f"✨ Adding new endpoint: {method} {original_url}")
+        
+        # Update collections and metadata
+        final_items[key] = item
+        updated_endpoints[key] = {
+            'method': method,
+            'url': normalized_url,  # Use normalized URL here instead of original
+            'name': item['name'],
+            'lastUpdated': datetime.now().isoformat()
+        }
+        
+        print(f"✅ Saved item to {item_path}")
+
+    # Create updated main collection
+    main_collection = {
+        "info": {
+            "name": "${REPO_NAME} API Reference",
+            "description": {
+                "content": "API endpoints documentation",
+                "type": "text/plain"
+            },
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+            "lastUpdated": datetime.now().isoformat()
+        },
+        "item": list(final_items.values())
+    }
+    
+    # Write updated main collection
+    with open("$MAIN_COLLECTION", 'w') as f:
+        json.dump(main_collection, f, indent=2)
+    print(f"✅ Updated main collection at {os.path.basename('$MAIN_COLLECTION')}")
+    
+    # Update and save metadata
+    methods_count = {}
+    for item in final_items.values():
+        method = item.get('request', {}).get('method', 'UNKNOWN')
+        methods_count[method] = methods_count.get(method, 0) + 1
+
+    # Create the metadata with preserved data
+    metadata = {
+        "totalEndpoints": len(final_items),
+        "lastUpdated": datetime.now().isoformat(),
+        "methods": methods_count,
+        "endpoints": updated_endpoints  # This now contains both old and new endpoints
+    }
+    
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    print(f"✅ Updated collection metadata at collection_metadata.json")
+
+except json.JSONDecodeError as e:
+    print(f"❌ JSON parsing error: {str(e)}")
+    with open('$RESPONSE_FILE', 'r') as f:
+        print("Raw response:", f.read())
+    sys.exit(1)
+except Exception as e:
+    print(f"❌ Error processing response: {str(e)}")
+    print("Response structure:", json.dumps(response, indent=2))
+    sys.exit(1)
+EOF
+
+# Stage the changes if previous steps were successful
+if [ $? -eq 0 ]; then
+    git add "$COLLECTIONS_DIR" 2>/dev/null || true
+    echo "✅ Staged changes in $COLLECTIONS_DIR"
+else
+    echo "❌ Failed to process response"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# Clean up temporary files
+rm -rf "$TEMP_DIR"
+echo "✅ Cleaned up temporary files"
