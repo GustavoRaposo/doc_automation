@@ -1,0 +1,9 @@
+gitflow (0.1.0) unstable; urgency=medium
+
+  * Initial release
+  * Basic hook management functionality
+  * Plugin system implementation
+  * Configuration management
+
+ -- GitFlow Maintainers <maintainers@gitflow.org>  Wed, 29 Jan 2025 20:07:14 +0000
+

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ -n "$CONSTANTS_LOADED" ]; then
+    return 0
+fi
+export CONSTANTS_LOADED=1
+
 # Determine environment and set base paths
 if [ -n "$GITFLOW_TEST_ENV" ]; then
     # Test environment
@@ -19,7 +24,7 @@ else
     GITFLOW_CONFIG_DIR="/etc/gitflow"
 fi
 
-# User configuration directory
+# User configuration directory with proper permissions
 GITFLOW_USER_CONFIG_DIR="$HOME/.config/gitflow"
 [ ! -d "$GITFLOW_USER_CONFIG_DIR" ] && mkdir -p "$GITFLOW_USER_CONFIG_DIR" && chmod 700 "$GITFLOW_USER_CONFIG_DIR"
 
@@ -36,7 +41,7 @@ GITFLOW_CONFIG_TEMPLATE="$GITFLOW_CONFIG_DIR/config.template"
 GITFLOW_USER_CONFIG="$GITFLOW_USER_CONFIG_DIR/config"
 GITFLOW_PLUGINS_REGISTRY="$GITFLOW_PLUGIN_METADATA_DIR/plugins.json"
 
-# Version control paths
+# Version control paths with environment-specific handling
 if [ -n "$GITFLOW_TEST_ENV" ]; then
     # Test environment - use absolute paths
     GITFLOW_VERSION_FILE="$GITFLOW_TEST_DIR/.git/version-control/.version"

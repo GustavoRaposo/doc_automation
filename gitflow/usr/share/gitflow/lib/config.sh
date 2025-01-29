@@ -2,42 +2,43 @@
 
 source "$GITFLOW_LIB_DIR/constants.sh"
 source "$GITFLOW_LIB_DIR/utils.sh"
-source "$GITFLOW_LIB_DIR/gitflow-version-control.sh"
 
 configure_settings() {
+   # Criar diretório de configuração se não existir
    mkdir -p "$GITFLOW_USER_CONFIG_DIR"
 
-   init_version
-
-   if [ -f "$GITFLOW_USER_CONFIG" ]; then
-       source "$GITFLOW_USER_CONFIG"
-   fi
-
+   # Verificar configuração existente
    if [ -f "$GITFLOW_USER_CONFIG" ]; then
        log_info "Found existing configuration."
        read -p "Do you want to reconfigure? (y/N) " reconfigure
        if [[ ! $reconfigure =~ ^[Yy]$ ]]; then
-           echo "Current version: $(get_version)"
-           return
+           return 0
        fi
    fi
 
-   read -p "Enter your webhook endpoint URL: " endpoint_url
-   while [ -z "$endpoint_url" ]; do
-       log_error "Endpoint URL cannot be empty"
-       read -p "Enter your webhook endpoint URL: " endpoint_url
-   done
-
-   read -p "Enter the name for your collections directory [postman_collections]: " collections_dir
-   collections_dir=${collections_dir:-postman_collections}
-
-   cat >"$GITFLOW_USER_CONFIG" <<EOF
-ENDPOINT_URL="$endpoint_url"
-COLLECTIONS_DIR="$collections_dir"
+   # Configuração base - não específica de plugins
+   cat > "$GITFLOW_USER_CONFIG" <<EOF
+# GitFlow Core Configuration
+VERSION_CONTROL_ENABLED=true
 EOF
 
-   log_success "Configuration saved successfully!"
-   echo "Current version: $(get_version)"
+   log_success "Core configuration saved successfully!"
+   
+   # Perguntar se deseja configurar plugins
+    read -p "Would you like to configure installed plugins? (y/N) " configure_plugins
+    if [[ $configure_plugins =~ ^[Yy]$ ]]; then
+        # Configurar plugins instalados
+        for plugin_type_dir in "$GITFLOW_OFFICIAL_PLUGINS_DIR" "$GITFLOW_COMMUNITY_PLUGINS_DIR"; do
+            if [ -d "$plugin_type_dir" ]; then
+                for plugin in "$plugin_type_dir"/*; do
+                    if [ -d "$plugin" ] && [ -f "$plugin/config/setup.sh" ]; then
+                        log_info "Configuring plugin $(basename "$plugin")..."
+                        bash "$plugin/config/setup.sh"
+                    fi
+                done
+            fi
+        done
+    fi
 }
 
 show_config() {

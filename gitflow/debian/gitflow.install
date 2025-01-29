@@ -1,0 +1,9 @@
+# Binary
+usr/bin/gitflow
+
+# Library files
+usr/share/gitflow/lib/*
+
+# Plugins
+usr/share/gitflow/plugins/official/*
+usr/share/gitflow/plugins/metadata/*

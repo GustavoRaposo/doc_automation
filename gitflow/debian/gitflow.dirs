@@ -1,0 +1,6 @@
+usr/bin
+usr/share/gitflow
+usr/share/gitflow/lib
+usr/share/gitflow/plugins/official
+usr/share/gitflow/plugins/metadata
+etc/gitflow

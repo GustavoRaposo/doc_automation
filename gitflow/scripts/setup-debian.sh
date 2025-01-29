@@ -51,9 +51,9 @@ if [ -d "usr/share/gitflow/lib" ]; then
     cp -r usr/share/gitflow/lib/* "$BUILD_ROOT/usr/share/gitflow/lib/"
 fi
 
-# Copy plugins
+# Copy plugins (Modified Section)
 echo "🔄 Copying plugins..."
-for plugin_type in official community templates; do
+for plugin_type in official; do
     SRC_DIR="usr/share/gitflow/plugins/$plugin_type"
     if [ -d "$SRC_DIR" ]; then
         mkdir -p "$BUILD_ROOT/usr/share/gitflow/plugins/$plugin_type"

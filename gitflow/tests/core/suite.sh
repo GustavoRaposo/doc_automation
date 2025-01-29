@@ -5,9 +5,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Source required libraries
-source "$PROJECT_ROOT/usr/share/gitflow/lib/utils.sh"
-
 # Track test results
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -19,10 +16,10 @@ run_test_suite() {
     
     if bash "$suite"; then
         ((TESTS_PASSED++))
-        echo "✅ Test suite passed: $(basename "$suite")"
+        log_success "Test suite passed: $(basename "$suite")"
     else
         ((TESTS_FAILED++))
-        echo "❌ Test suite failed: $(basename "$suite")"
+        log_error "Test suite failed: $(basename "$suite")"
         return 1
     fi
 }
@@ -32,25 +29,42 @@ setup_test_env() {
     TEST_DIR=$(mktemp -d)
     echo "Setting up test environment in $TEST_DIR"
     
-    # Create test git repository
+    # Create necessary directories
+    mkdir -p "$TEST_DIR/usr/share/gitflow/lib"
+    mkdir -p "$TEST_DIR/usr/share/gitflow/plugins/official"
+    mkdir -p "$TEST_DIR/usr/share/gitflow/plugins/community"
+    mkdir -p "$TEST_DIR/etc/gitflow"
+    mkdir -p "$TEST_DIR/.config/gitflow"
+    
+    # Copy library files
+    cp -r "$PROJECT_ROOT/usr/share/gitflow/lib/"* "$TEST_DIR/usr/share/gitflow/lib/"
+    cp -r "$PROJECT_ROOT/usr/share/gitflow/plugins" "$TEST_DIR/usr/share/gitflow/"
+    
+    # Create git repository
     cd "$TEST_DIR"
     git init
-    
-    # Create necessary directories
     mkdir -p .git/hooks
-    mkdir -p .config/gitflow
-    mkdir -p /tmp/gitflow-test-etc/gitflow
+    mkdir -p .git/version-control
     
     # Export test environment variables
     export GITFLOW_TEST_DIR="$TEST_DIR"
     export GITFLOW_PROJECT_ROOT="$PROJECT_ROOT"
     export HOME="$TEST_DIR"
-    export GITFLOW_SYSTEM_DIR="$PROJECT_ROOT/usr/share/gitflow"
-    export GITFLOW_CONFIG_DIR="/tmp/gitflow-test-etc/gitflow"
+    export GITFLOW_SYSTEM_DIR="$TEST_DIR/usr/share/gitflow"
+    export GITFLOW_LIB_DIR="$GITFLOW_SYSTEM_DIR/lib"
+    export GITFLOW_CONFIG_DIR="$TEST_DIR/etc/gitflow"
+    export GITFLOW_USER_CONFIG_DIR="$TEST_DIR/.config/gitflow"
+    export GITFLOW_TEST_ENV=1
     
-    # Create test configuration directories
-    mkdir -p "$TEST_DIR/.config/gitflow"
-    sudo mkdir -p /etc/gitflow || true
+    # Add gitflow to PATH
+    export PATH="$PROJECT_ROOT/usr/bin:$PATH"
+    
+    # Source required libraries
+    source "$GITFLOW_LIB_DIR/utils.sh"
+    
+    echo "Test environment set up with:"
+    echo "GITFLOW_SYSTEM_DIR=$GITFLOW_SYSTEM_DIR"
+    echo "GITFLOW_LIB_DIR=$GITFLOW_LIB_DIR"
 }
 
 # Cleanup test environment
@@ -58,7 +72,6 @@ cleanup() {
     if [ -d "$TEST_DIR" ]; then
         cd "$PROJECT_ROOT"
         rm -rf "$TEST_DIR"
-        sudo rm -rf /tmp/gitflow-test-etc
     fi
 }
 
@@ -78,7 +91,6 @@ main() {
         "test_system.sh"
         "test_config.sh"
         "test_hook_management.sh"
-        "test_version_control.sh"
     )
     
     # Run test suites in order

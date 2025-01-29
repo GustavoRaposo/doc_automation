@@ -1,127 +1,125 @@
-# GitFlow - Git Hook Plugin Framework
+# GitFlow - Framework de Plugins para Hooks Git
 
-A flexible framework for creating, managing, and using Git hook plugins. GitFlow provides the infrastructure and tools to develop, distribute, and maintain Git hooks in a modular way.
+Um framework flexível para criar, gerenciar e usar plugins de hooks Git com foco em controle de versão e automação de documentação.
 
-## Overview
+## Visão Geral
 
-GitFlow focuses on providing:
-- Plugin-based hook architecture
-- Easy hook development framework
-- Plugin management system
-- Shared utility libraries
-- Configuration management
-- Developer-friendly tooling
+GitFlow fornece:
+- Sistema robusto de controle de versão semântica
+- Automação de documentação API via Postman
+- Arquitetura baseada em plugins para hooks
+- Gerenciamento de configuração flexível
+- Ferramentas de desenvolvimento integradas
 
-## Requirements
+## Requisitos
 
-- Ubuntu 22.04 LTS (Jammy) or higher
-- Git >= 2.34.1
+- Ubuntu 22.04 LTS (Jammy)
+- Git >= 2.34.1 
 - Python >= 3.8.0
 - jq
 - curl
 
-## Quick Start
-
-### Installation
+## Instalação
 
 ```bash
-# From .deb package
+# Via pacote .deb
 sudo apt-get update
 sudo apt-get install -y git curl python3 jq
 
-## Install GitFlow
+# Instalar GitFlow
 cd build/
 sudo dpkg -i gitflow_*_all.deb
 sudo apt-get install -f
 cd ..
 
-# From source
+# Via código fonte
 sudo apt-get install -y build-essential devscripts debhelper
 ./scripts/build.sh
 ```
 
 ### Basic Usage
 
+#### Controle de Versão
+
 ```bash
-# Configure GitFlow
-gitflow --config
+# Inicializar versão
+gitflow --init-fork
 
-# List available plugins
-gitflow --list-hooks
+# Incrementar versão major
+gitflow --increment-major
 
-# Install a plugin
-gitflow --install-hook <plugin-name>
+# Consultar versão atual
+gitflow --get-version
 
-# Create a new plugin
-gitflow --create-hook <plugin-name>
+# Definir versão manualmente
+gitflow --set-version v1.2.3.4
 ```
 
-## Command Reference
+#### Plugins
+```bash
+# Listar plugins disponíveis
+gitflow --list-hooks
 
-### Plugin Management
-- `--install-hook <name>` - Install a hook plugin
-- `--uninstall-hook <name>` - Remove a hook plugin
-- `--list-hooks` - Show available plugins
-- `--create-hook <name>` - Create new plugin from template
+# Instalar plugin
+gitflow --install-hook doc-update-hook
 
-### Configuration
-- `--config` - Interactive configuration
-- `--show-config` - Display settings
-- `--reset` - Reset to defaults
-- `--help` - Show usage info
+# Configurar plugin
+gitflow --config
+```
 
-## Framework Architecture
+...existing code...
+
+### Plugins Oficiais
+
+#### version-update-hook
+- Controle de versão semântica automatizado
+- Incremento baseado em branches
+- Suporte a tags de release
+- Resolução de conflitos de merge
+
+### Plugins da Comunidade
+
+#### doc-update-hook
+- Atualização automática de documentação API
+- Integração com Postman Collections
+- Normalização de URLs
+- Versionamento de endpoints
+
+## Arquitetura
 
 ```
 /usr/share/gitflow/
-├── lib/                    # Core libraries
-│   ├── utils.sh           # Shared utilities
-│   ├── git.sh             # Git operations
-│   └── hook-management.sh # Plugin management
-├── plugins/               
-│   ├── official/          # Official plugins
-│   ├── community/         # Community plugins
-│   └── templates/         # Plugin templates
-└── docs/                  # Framework documentation
-
-/etc/gitflow/              # System configuration
-~/.config/gitflow/         # User configuration
+├── lib/                    # Bibliotecas core
+│   ├── utils.sh           # Utilitários compartilhados  
+│   ├── git.sh             # Operações Git
+│   └── version-control.sh # Controle de versão
+├── plugins/
+│   ├── official/          # Plugins oficiais
+│   ├── community/         # Plugins da comunidade
+│   └── templates/         # Templates de plugins
+└── config/                # Configuração global
 ```
 
-## Plugin Development
-
-GitFlow provides a standardized way to create Git hooks. Here's the basic plugin structure:
+## Desenvolvimento de Plugins
 
 ```
 plugin-name/
-├── events/                  # Event handlers
-│   ├── pre-commit/         
-│   │   └── script.sh       # Pre-commit hook script
-│   └── post-commit/        
-│       └── script.sh       # Post-commit hook script
-├── lib/                    # Plugin-specific libraries
-│   └── functions.sh        # Shared functions
-├── tmp/                    # Temporary files directory
-│   └── .gitignore         # Ignore temporary files
-├── metadata.json          # Plugin metadata
-└── README.md              # Plugin documentation
+├── events/              
+│   ├── pre-commit/     # Handler pre-commit
+│   └── post-commit/    # Handler post-commit
+├── lib/                # Funções compartilhadas
+├── config/             # Configuração do plugin
+└── metadata.json       # Metadados do plugin
 ```
 
-### Plugin Creation
+### Exemplo de `metadata.json`
 
-1. Create new plugin:
-```bash
-gitflow --create-hook my-plugin
-```
-
-2. Define metadata:
 ```json
 {
     "name": "my-plugin",
     "version": "1.0.0",
-    "description": "Plugin description",
+    "description": "Plugin description", 
     "author": "Your Name",
-    "email": "your.email@example.com",
     "events": ["pre-commit", "post-commit"],
     "dependencies": {
         "git": ">=2.34.1"
@@ -129,59 +127,13 @@ gitflow --create-hook my-plugin
 }
 ```
 
-3. Implement your hooks in the events/ directory
-4. Add helper functions in lib/
-5. Document usage in README.md
+## Contribuindo
 
-## Core Features
+- Fork o repositório
+- Crie sua branch de feature
+- Escreva testes
+- Envie um pull request
 
-### Hook Management
-- Plugin installation and removal
-- Dependency management
-- Event handling
-- Configuration management
-
-### Development Tools
-- Plugin templates
-- Shared utilities
-- Testing framework
-- Configuration validation
-
-### Plugin Distribution
-- Official plugin repository
-- Community plugin support
-- Version management
-- Update mechanism
-
-## Troubleshooting
-
-### Common Issues
-1. **Plugin Installation Fails**
-   - Verify repository exists
-   - Check file permissions
-   - Verify dependencies
-
-2. **Framework Issues**
-   - Check configuration
-   - Verify installation
-   - Review logs
-
-### Maintenance
-```bash
-# Remove GitFlow
-sudo dpkg -r gitflow
-
-# Clean configuration
-rm -rf ~/.config/gitflow
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Write tests
-4. Submit a pull request
-
-## License
+## Licença
 
 MIT License

@@ -2,10 +2,15 @@
 
 source "$GITFLOW_LIB_DIR/utils.sh"
 
-PLUGIN_TMP_DIR="$(dirname "$0")/../tmp"
-VERSION_FILE=".git/version-control/.version"
-BRANCH_VERSIONS_FILE=".git/version-control/.branch_versions"
+# Simplified temporary directory handling
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLUGIN_TMP_DIR="$PLUGIN_DIR/tmp"
 VERSION_DIR=".git/version-control"
+VERSION_FILE="$VERSION_DIR/.version"
+BRANCH_VERSIONS_FILE="$VERSION_DIR/.branch_versions"
+
+# Ensure tmp directory exists
+[ ! -d "$PLUGIN_TMP_DIR" ] && mkdir -p "$PLUGIN_TMP_DIR"
 
 # Version Control Functions
 get_version() {
@@ -154,6 +159,72 @@ handle_rebase() {
     fi
 
     save_branch_version "$current_branch" "$branch_c.$branch_d"
+}
+
+init_fork() {
+    # Garantir que o diretório .git existe
+    if [ ! -d ".git" ]; then
+        git init
+    fi
+    
+    # Criar diretório de controle de versão
+    mkdir -p "$VERSION_DIR"
+    
+    # Reset versão para 0.0.0.0
+    echo "v0.0.0.0" > "$VERSION_FILE"
+    chmod 644 "$VERSION_FILE"
+    
+    # Reset branch versions
+    echo "{}" > "$BRANCH_VERSIONS_FILE"
+    chmod 644 "$BRANCH_VERSIONS_FILE"
+    
+    # Adicionar arquivos ao git
+    git add "$VERSION_FILE" "$BRANCH_VERSIONS_FILE" 2>/dev/null || true
+    
+    log_success "Fork initialized with version v0.0.0.0"
+    return 0
+}
+
+increment_major() {
+    # Garantir que o diretório existe
+    mkdir -p "$VERSION_DIR"
+    
+    local current_version=$(get_version)
+    local v a b c d
+    
+    # Extrair os componentes da versão atual
+    local version_numbers=${current_version#v}
+    IFS='.' read -r a b c d <<< "$version_numbers"
+    
+    # Garantir que os valores são numéricos
+    [[ $a =~ ^[0-9]+$ ]] || a=0
+    [[ $b =~ ^[0-9]+$ ]] || b=0
+    [[ $c =~ ^[0-9]+$ ]] || c=0
+    [[ $d =~ ^[0-9]+$ ]] || d=0
+    
+    # Incrementar versão major e resetar outros componentes
+    a=$((a + 1))
+    b=0
+    c=0
+    d=0
+    
+    local new_version="v$a.$b.$c.$d"
+    set_version "$new_version"
+    log_success "Incremented major version to $new_version"
+}
+
+tag_release() {
+    local version=$1
+    local release_name=$2
+    
+    # Validate version format
+    if [[ ! $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        log_error "Invalid version format. Must be vA.B.C.D"
+        return 1
+    fi
+    
+    # Create and push tag
+    push_tag "$version" "Release: $release_name"
 }
 
 handle_version_bump() {

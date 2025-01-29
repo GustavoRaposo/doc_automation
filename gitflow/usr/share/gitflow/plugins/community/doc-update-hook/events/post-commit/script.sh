@@ -7,13 +7,14 @@ source "$GITFLOW_LIB_DIR/config.sh"
 source "$(dirname "$0")/../../lib/functions.sh"
 source "$(dirname "$0")/../../lib/git_utils.sh"
 
-# Load configuration
-if [ ! -f "$GITFLOW_USER_CONFIG" ]; then
-    log_error "Configuration file not found. Please run 'gitflow --config' to configure."
+# Alterar a linha que carrega a configuração
+PLUGIN_CONFIG_FILE="$GITFLOW_USER_CONFIG_DIR/doc-update-hook/config"
+if [ ! -f "$PLUGIN_CONFIG_FILE" ]; then
+    log_error "Plugin configuration not found. Please run 'gitflow --config' to configure."
     exit 1
 fi
 
-source "$GITFLOW_USER_CONFIG"
+source "$PLUGIN_CONFIG_FILE"
 
 # Verify required variables
 if [ -z "$ENDPOINT_URL" ] || [ -z "$COLLECTIONS_DIR" ]; then

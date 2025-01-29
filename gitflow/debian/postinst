@@ -1,0 +1,47 @@
+#!/bin/bash
+set -e
+
+# Source path definitions
+GITFLOW_SYSTEM_DIR="/usr/share/gitflow"
+GITFLOW_PLUGINS_DIR="$GITFLOW_SYSTEM_DIR/plugins"
+GITFLOW_PLUGIN_METADATA_DIR="$GITFLOW_PLUGINS_DIR/metadata"
+GITFLOW_PLUGINS_REGISTRY="$GITFLOW_PLUGIN_METADATA_DIR/plugins.json"
+
+case "$1" in
+    configure)
+        # Ensure directories exist
+        mkdir -p "$GITFLOW_PLUGIN_METADATA_DIR"
+        mkdir -p "$GITFLOW_PLUGINS_DIR/official"
+        mkdir -p "$GITFLOW_PLUGINS_DIR/community"
+        mkdir -p "$GITFLOW_PLUGINS_DIR/templates/basic"
+        
+        # Initialize empty plugins registry if it doesn't exist
+        if [ ! -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
+            echo '{"plugins":{}}' > "$GITFLOW_PLUGINS_REGISTRY"
+            chmod 644 "$GITFLOW_PLUGINS_REGISTRY"
+        fi
+
+        # Initialize plugins registry with proper JSON structure
+        PLUGINS_REGISTRY="$GITFLOW_PLUGIN_METADATA_DIR/plugins.json"
+        if [ ! -f "$PLUGINS_REGISTRY" ] || [ ! -s "$PLUGINS_REGISTRY" ]; then
+            echo '{"plugins":{}}' > "$PLUGINS_REGISTRY"
+            chmod 644 "$PLUGINS_REGISTRY"
+        fi
+
+        # Set correct permissions for the core system
+        chown -R root:root "$GITFLOW_SYSTEM_DIR"
+        find "$GITFLOW_SYSTEM_DIR" -type f -name "*.sh" -exec chmod 755 {} \;
+        find "$GITFLOW_SYSTEM_DIR" -type f ! -name "*.sh" -exec chmod 644 {} \;
+        find "$GITFLOW_SYSTEM_DIR" -type d -exec chmod 755 {} \;
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

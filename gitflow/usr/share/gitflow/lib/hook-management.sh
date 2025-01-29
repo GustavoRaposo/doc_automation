@@ -1,37 +1,107 @@
 #!/bin/bash
+set -e
 
-# Source constants
-source "$GITFLOW_LIB_DIR/constants.sh"
+# Required dependency checks
+[ -z "$GITFLOW_LIB_DIR" ] && echo "❌ GITFLOW_LIB_DIR not set" && exit 1
 
+# Source dependencies with error handling
+for dep in constants.sh utils.sh; do
+    if [ -f "$GITFLOW_LIB_DIR/$dep" ]; then
+        source "$GITFLOW_LIB_DIR/$dep" || {
+            echo "❌ Failed to source $dep" >&2
+            exit 1
+        }
+    else
+        echo "❌ Required dependency not found: $dep" >&2
+        exit 1
+    fi
+done
+
+# Initialize required variables if not set
+[ -z "$GITFLOW_PLUGINS_DIR" ] && export GITFLOW_PLUGINS_DIR="$GITFLOW_SYSTEM_DIR/plugins"
+[ -z "$GITFLOW_PLUGINS_REGISTRY" ] && export GITFLOW_PLUGINS_REGISTRY="$GITFLOW_PLUGINS_DIR/metadata/plugins.json"
+
+# Ensure required directories exist
+mkdir -p "$GITFLOW_PLUGINS_DIR/metadata"
+
+# Ensure required commands are available
+for cmd in jq git; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+        echo "❌ Required command not found: $cmd" >&2
+        exit 1
+    fi
+done
+
+# Plugin Registry Management
 register_plugin() {
     local plugin_name="$1"
-    local plugin_path="$GITFLOW_PLUGINS_DIR/community/$plugin_name"
+    local plugin_type="$2"
+    local plugin_path="$GITFLOW_PLUGINS_DIR/$plugin_type/$plugin_name"
 
+    # Validate plugin directory
+    if [ ! -d "$plugin_path" ]; then
+        log_error "Plugin directory not found: $plugin_path"
+        return 1
+    }
+
+    # Validate metadata file
+    local metadata_file="$plugin_path/metadata.json"
+    if [ ! -f "$metadata_file" ]; then
+        log_error "Metadata not found for plugin $plugin_name"
+        return 1
+    }
+
+    # Validate JSON format
+    if ! jq empty "$metadata_file" 2>/dev/null; then
+        log_error "Invalid metadata JSON for plugin $plugin_name"
+        return 1
+    }
+
+    # Ensure registry directory exists
+    mkdir -p "$(dirname "$GITFLOW_PLUGINS_REGISTRY")"
+
+    # Initialize registry if needed
     if [ ! -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
         echo '{"plugins":{}}' > "$GITFLOW_PLUGINS_REGISTRY"
+        chmod 644 "$GITFLOW_PLUGINS_REGISTRY"
     fi
 
-    local metadata="{}"
-    if [ -f "$plugin_path/metadata.json" ]; then
-        metadata=$(cat "$plugin_path/metadata.json")
-    fi
-
+    # Create temporary file for atomic update
     local temp_file=$(mktemp)
-    jq --arg name "$plugin_name" --arg meta "$metadata" \
-        '.plugins[$name] = ($meta | fromjson)' "$GITFLOW_PLUGINS_REGISTRY" > "$temp_file"
-    mv "$temp_file" "$GITFLOW_PLUGINS_REGISTRY"
-}
-
-find_hooks_dir() {
-    if [ -d "$GITFLOW_OFFICIAL_PLUGINS_DIR" ]; then
-        echo "$GITFLOW_OFFICIAL_PLUGINS_DIR"
-    elif [ -d "$GITFLOW_COMMUNITY_PLUGINS_DIR" ]; then
-        echo "$GITFLOW_COMMUNITY_PLUGINS_DIR"
+    
+    # Update registry with proper JSON handling
+    if jq --arg name "$plugin_name" \
+          --arg type "$plugin_type" \
+          --slurpfile meta "$metadata_file" \
+          '.plugins[$name] = {
+              "type": $type,
+              "installed": true,
+              "version": ($meta[0].version // "0.0.0"),
+              "description": ($meta[0].description // "No description"),
+              "author": ($meta[0].author // "Unknown")
+           }' "$GITFLOW_PLUGINS_REGISTRY" > "$temp_file"; then
+        mv "$temp_file" "$GITFLOW_PLUGINS_REGISTRY"
+        chmod 644 "$GITFLOW_PLUGINS_REGISTRY"
+        log_success "Plugin $plugin_name registered successfully"
+        return 0
     else
+        rm -f "$temp_file"
+        log_error "Failed to update plugin registry"
         return 1
     fi
 }
 
+unregister_plugin() {
+    local plugin_name="$1"
+    [ ! -f "$GITFLOW_PLUGINS_REGISTRY" ] && return 0
+    
+    local temp_file=$(mktemp)
+    jq "del(.plugins[\"$plugin_name\"])" "$GITFLOW_PLUGINS_REGISTRY" > "$temp_file"
+    mv "$temp_file" "$GITFLOW_PLUGINS_REGISTRY"
+    chmod 644 "$GITFLOW_PLUGINS_REGISTRY"
+}
+
+# Plugin Management
 create_plugin() {
     local plugin_name="$1"
     local target_dir="$GITFLOW_COMMUNITY_PLUGINS_DIR/$plugin_name"
@@ -49,217 +119,177 @@ create_plugin() {
     echo "Edit metadata.json and implement your hook logic in events/"
 }
 
-get_hook_metadata() {
-   local hook_file="$1"
-   local metadata=""
-   local n=0
-
-   while IFS= read -r line && [[ $n -lt 20 ]]; do
-       if [[ $line =~ ^#[[:space:]]*git-hook:[[:space:]]*([^|]+)\|(.+)$ ]]; then
-           metadata="${BASH_REMATCH[1]}|${BASH_REMATCH[2]}"
-           break
-       fi
-       ((n++))
-   done < "$hook_file"
-
-   echo "$metadata"
-}
-
+# Hook Management
 install_specific_hook() {
     local hook_name="$1"
-    local plugin_type="community"
-    local repo_root=$(git rev-parse --show-toplevel)
-    local version_dir="$repo_root/.git/version-control"
+    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    [ ! -d "$repo_root/.git" ] && log_error "Not a git repository" && return 1
 
-    # Check official plugins first
-    if [ -d "$GITFLOW_OFFICIAL_PLUGINS_DIR/$hook_name" ]; then
-        plugin_type="official"
-    fi
+    # Find plugin location
+    local plugin_dir=""
+    local plugin_types=("official" "community")
+    for type in "${plugin_types[@]}"; do
+        if [ -d "$GITFLOW_PLUGINS_DIR/$type/$hook_name" ]; then
+            plugin_dir="$GITFLOW_PLUGINS_DIR/$type/$hook_name"
+            break
+        fi
+    done
 
-    local plugin_dir="$GITFLOW_PLUGINS_DIR/$plugin_type/$hook_name"
+    [ -z "$plugin_dir" ] && log_error "Hook plugin $hook_name not found" && return 1
+
+    # Create hook directory if needed
+    mkdir -p "$repo_root/.git/hooks"
+
+    # Install hook scripts
+    local event_dir="$plugin_dir/events"
+    local installed=0
     
-    if [ ! -d "$plugin_dir" ]; then
-        log_error "Hook plugin $hook_name not found"
-        return 1
-    }
+    for event_type in "$event_dir"/*; do
+        [ ! -d "$event_type" ] && continue
+        
+        local event_name=$(basename "$event_type")
+        local script_file="$event_type/script.sh"
+        local hook_file="$repo_root/.git/hooks/$event_name"
 
-    mkdir -p "$version_dir"
+        if [ -f "$script_file" ]; then
+            if [ ! -f "$hook_file" ]; then
+                echo '#!/bin/bash' > "$hook_file"
+                chmod +x "$hook_file"
+            fi
 
-   if [ ! -f "$GITFLOW_VERSION_FILE" ]; then
-       echo "v0.0.0.0" > "$GITFLOW_VERSION_FILE"
-       chmod 644 "$GITFLOW_VERSION_FILE"
-   fi
-
-   if [ ! -f "$GITFLOW_BRANCH_VERSIONS_FILE" ]; then
-       echo "{}" > "$GITFLOW_BRANCH_VERSIONS_FILE"
-       chmod 644 "$GITFLOW_BRANCH_VERSIONS_FILE"
-   fi
-
-   if [ ! -d "$(pwd)/.git" ]; then
-       log_warning "This directory is not a Git repository."
-       return 1
-   fi
-
-   mkdir -p "$HOOKS_SOURCE_DIR/files"
-
-   if [ -f "$HOOKS_SOURCE_DIR/events/pre-commit/script.sh" ]; then
-       local git_hook_file=".git/hooks/pre-commit"
-       if [ ! -f "$git_hook_file" ]; then
-           echo '#!/bin/bash' > "$git_hook_file"
-           chmod +x "$git_hook_file"
-       fi
-       if ! grep -q "# Begin $hook_name" "$git_hook_file"; then
-           cat >> "$git_hook_file" <<EOFHOOK
+            if ! grep -q "# Begin $hook_name" "$hook_file"; then
+                cat >> "$hook_file" <<EOFHOOK
 
 # Begin $hook_name
-$(cat "$HOOKS_SOURCE_DIR/events/pre-commit/script.sh")
+$(cat "$script_file")
 # End $hook_name
 EOFHOOK
-           log_success "✅ Pre-commit hook for $hook_name installed successfully!"
-       fi
-   fi
-
-   if [ -f "$HOOKS_SOURCE_DIR/events/post-commit/script.sh" ]; then
-       local git_hook_file=".git/hooks/post-commit"
-       if [ ! -f "$git_hook_file" ]; then
-           echo '#!/bin/bash' > "$git_hook_file"
-           chmod +x "$git_hook_file"
-       fi
-       if ! grep -q "# Begin $hook_name" "$git_hook_file"; then
-           cat >> "$git_hook_file" <<EOFHOOK
-
-# Begin $hook_name
-$(cat "$HOOKS_SOURCE_DIR/events/post-commit/script.sh")
-# End $hook_name
-EOFHOOK
-           log_success "✅ Post-commit hook for $hook_name installed successfully!"
-       fi
-   fi
-
-   return 0
-}
-
-list_available_hooks() {
-    log_info "Official plugins:"
-    for plugin in "$GITFLOW_OFFICIAL_PLUGINS_DIR"/*; do
-        if [ -d "$plugin" ]; then
-            _display_plugin_info "$plugin" "official"
+                log_success "✅ $event_name hook for $hook_name installed successfully!"
+                ((installed++))
+            fi
         fi
     done
 
-    log_info "\nCommunity plugins:"
-    for plugin in "$GITFLOW_COMMUNITY_PLUGINS_DIR"/*; do
-        if [ -d "$plugin" ]; then
-            _display_plugin_info "$plugin" "community"
-        fi
-    done
+    [ $installed -eq 0 ] && log_warning "No hook scripts found in $hook_name"
+    return 0
 }
 
+uninstall_hook() {
+    local hook_name="$1"
+    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+    [ ! -d "$repo_root/.git" ] && log_error "Not a git repository" && return 1
+
+    local hooks_dir="$repo_root/.git/hooks"
+    local uninstalled=0
+
+    # Process all hook files in .git/hooks
+    for hook_file in "$hooks_dir"/*; do
+        [ ! -f "$hook_file" ] && continue
+
+        local tmp_file=$(mktemp)
+        local in_section=0
+        local content_written=0
+
+        while IFS= read -r line; do
+            if [[ $line == "# Begin $hook_name" ]]; then
+                in_section=1
+                continue
+            fi
+            if [[ $line == "# End $hook_name" ]]; then
+                in_section=0
+                continue
+            fi
+            if [ $in_section -eq 0 ]; then
+                echo "$line" >> "$tmp_file"
+                content_written=1
+            fi
+        done < "$hook_file"
+
+        if [ $content_written -eq 1 ]; then
+            sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp_file"
+            mv "$tmp_file" "$hook_file"
+            chmod +x "$hook_file"
+            ((uninstalled++))
+        else
+            rm -f "$hook_file"
+        fi
+        rm -f "$tmp_file"
+    done
+
+    [ $uninstalled -gt 0 ] && log_success "✅ Hook $hook_name uninstalled successfully!"
+    return 0
+}
+
+# Plugin Information
 list_available_hooks() {
-   local HOOKS_SOURCE_DIR=$(find_hooks_dir)
-
-   if [ -z "$HOOKS_SOURCE_DIR" ]; then
-       log_error "Hooks directory not found"
-       return 1
-   fi
-
-   log_info "Available hooks:"
-   for hook_file in "$HOOKS_SOURCE_DIR"/*; do
-       if [ -f "$hook_file" ]; then
-           local hook_name=$(basename "$hook_file")
-           local metadata=$(get_hook_metadata "$hook_file")
-           if [ -n "$metadata" ]; then
-               local git_event=$(echo "$metadata" | cut -d'|' -f1 | xargs)
-               local description=$(echo "$metadata" | cut -d'|' -f2)
-               local installed=""
-
-               if [ -f ".git/hooks/${git_event}" ] && grep -q "# Begin ${hook_name}" ".git/hooks/${git_event}"; then
-                   installed=" [✓ Installed]"
-               else
-                   installed=" [✗ Not installed]"
-               fi
-
-               echo "  - $hook_name$installed"
-               echo "    Event: $git_event"
-               echo "    Description: $description"
-           fi
-       fi
-   done
+    local plugin_types=("official" "community")
+    local found_plugins=0
+    
+    for type in "${plugin_types[@]}"; do
+        local plugins_dir="$GITFLOW_PLUGINS_DIR/$type"
+        if [ -d "$plugins_dir" ] && [ -n "$(ls -A "$plugins_dir" 2>/dev/null)" ]; then
+            log_info "${type^} plugins:"
+            for plugin in "$plugins_dir"/*; do
+                if [ -d "$plugin" ]; then
+                    _display_plugin_info "$plugin" "$type"
+                    ((found_plugins++))
+                fi
+            done
+            echo
+        fi
+    done
+    
+    if [ $found_plugins -eq 0 ]; then
+        log_info "No plugins found."
+    fi
 }
 
 _display_plugin_info() {
     local plugin_path="$1"
     local plugin_type="$2"
     local plugin_name=$(basename "$plugin_path")
+    local metadata_file="$plugin_path/metadata.json"
     
-    if [ -f "$plugin_path/metadata.json" ]; then
-        local description=$(jq -r '.description' "$plugin_path/metadata.json")
-        local version=$(jq -r '.version' "$plugin_path/metadata.json")
-        local author=$(jq -r '.author' "$plugin_path/metadata.json")
-        
-        echo "  - $plugin_name ($plugin_type) v$version"
-        echo "    Author: $author"
-        echo "    Description: $description"
+    if [ -f "$metadata_file" ]; then
+        # Validate JSON before processing
+        if jq empty "$metadata_file" 2>/dev/null; then
+            echo "  - $plugin_name ($plugin_type)"
+            # Use more robust jq filtering
+            jq -r '
+                . as $root |
+                ["version", "description", "author"] |
+                .[] |
+                select($root[.] != null) |
+                "    \(.): \($root[.])"
+            ' "$metadata_file" 2>/dev/null || true
+        else
+            log_warning "Invalid metadata for plugin: $plugin_name"
+            echo "  - $plugin_name ($plugin_type) [Invalid Metadata]"
+        fi
+    else
+        echo "  - $plugin_name ($plugin_type) [No Metadata]"
     fi
 }
 
-uninstall_hook() {
-   local hook_name="$1"
-   local HOOKS_SOURCE_DIR=$(find_hooks_dir)
+list_installed_plugins() {
+    [ ! -f "$GITFLOW_PLUGINS_REGISTRY" ] && log_info "No plugins installed." && return 0
 
-   if [ ! -d ".git" ]; then
-       log_warning "This directory is not a Git repository."
-       return 1
-   fi
+    echo "📦 Installed Plugins:"
+    echo "---------------------"
+    
+    local plugins=$(jq -r '.plugins | to_entries[] | select(.value.installed == true)' "$GITFLOW_PLUGINS_REGISTRY")
+    [ -z "$plugins" ] && echo "No plugins registered." && return 0
 
-   if [ -z "$HOOKS_SOURCE_DIR" ]; then
-       return 1
-   fi
-
-   local hook_file="$HOOKS_SOURCE_DIR/$hook_name"
-   if [ ! -f "$hook_file" ]; then
-       log_error "Hook $hook_name not found"
-       return 1
-   fi
-
-   local metadata=$(get_hook_metadata "$hook_file")
-   local git_event=$(echo "$metadata" | cut -d'|' -f1 | xargs)
-   local git_hook_file=".git/hooks/${git_event}"
-
-   if [ ! -f "$git_hook_file" ]; then
-       log_error "Git hook file for event $git_event not found."
-       return 1
-   fi
-
-   local tmp_file=$(mktemp)
-   local in_hook_section=0
-   local content_written=0
-
-   while IFS= read -r line; do
-       if [[ $line == "# Begin ${hook_name}" ]]; then
-           in_hook_section=1
-           continue
-       fi
-       if [[ $line == "# End ${hook_name}" ]]; then
-           in_hook_section=0
-           continue
-       fi
-       if [ $in_hook_section -eq 0 ]; then
-           echo "$line" >> "$tmp_file"
-           content_written=1
-       fi
-   done < "$git_hook_file"
-
-   if [ $content_written -eq 1 ]; then
-       sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp_file"
-       mv "$tmp_file" "$git_hook_file"
-       chmod +x "$git_hook_file"
-       log_success "✅ Hook $hook_name uninstalled successfully!"
-   else
-       rm -f "$git_hook_file"
-       rm -f "$tmp_file"
-       log_success "✅ Removed empty hook file: $git_hook_file"
-   fi
-
-   return 0
+    echo "$plugins" | while IFS= read -r plugin; do
+        local name=$(echo "$plugin" | jq -r '.key')
+        local type=$(echo "$plugin" | jq -r '.value.type')
+        local version=$(echo "$plugin" | jq -r '.value.version')
+        
+        if [ -d "$GITFLOW_PLUGINS_DIR/$type/$name" ]; then
+            echo "✔ $name (${type^}) v${version}"
+        else
+            echo "⚠️ $name (${type^}) [Not Installed]"
+            unregister_plugin "$name"
+        fi
+    done
 }

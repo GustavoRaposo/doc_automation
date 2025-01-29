@@ -1,0 +1,15 @@
+Source: gitflow
+Section: utils
+Priority: optional
+Maintainer: GitFlow Maintainers <maintainers@gitflow.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.5.1
+Homepage: https://github.com/yourusername/gitflow
+
+Package: gitflow
+Architecture: all
+Depends: ${misc:Depends}, git (>= 2.34.1), jq, curl
+Description: Git hook plugin framework
+ A flexible framework for creating, managing, and using Git hook plugins.
+ GitFlow provides the infrastructure and tools to develop, distribute,
+ and maintain Git hooks in a modular way.

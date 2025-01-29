@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+export DH_VERBOSE=1
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	# Create core system directories
+	mkdir -p debian/gitflow/usr/share/gitflow/lib
+	mkdir -p debian/gitflow/usr/share/gitflow/plugins/metadata
+	mkdir -p debian/gitflow/usr/bin
+	mkdir -p debian/gitflow/etc/gitflow
+	
+	# Copy core files only
+	cp -r usr/share/gitflow/lib/* debian/gitflow/usr/share/gitflow/lib/
+	cp usr/bin/gitflow debian/gitflow/usr/bin/
+	
+	# Initialize plugins metadata directory
+	mkdir -p debian/gitflow/usr/share/gitflow/plugins/metadata
+	echo '{"plugins":{}}' > debian/gitflow/usr/share/gitflow/plugins/metadata/plugins.json
+	
+	# Create plugin directory structure (empty)
+	mkdir -p debian/gitflow/usr/share/gitflow/plugins/official
+	mkdir -p debian/gitflow/usr/share/gitflow/plugins/community
+	mkdir -p debian/gitflow/usr/share/gitflow/plugins/templates/basic
+	
+	# Create configuration directory and default files
+	mkdir -p debian/gitflow/etc/gitflow
+	touch debian/gitflow/etc/gitflow/config.template
+	
+	# Set permissions
+	find debian/gitflow/usr/share/gitflow -type f -name "*.sh" -exec chmod 755 {} \;
+	find debian/gitflow/usr/share/gitflow -type f ! -name "*.sh" -exec chmod 644 {} \;
+	find debian/gitflow/usr/share/gitflow -type d -exec chmod 755 {} \;
+	chmod 755 debian/gitflow/usr/bin/gitflow
+	chmod 644 debian/gitflow/etc/gitflow/config.template
+	chmod 644 debian/gitflow/usr/share/gitflow/plugins/metadata/plugins.json
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 755 debian/gitflow/usr/bin/gitflow
+	find debian/gitflow/usr/share/gitflow -type f -name "*.sh" -exec chmod 755 {} \;
