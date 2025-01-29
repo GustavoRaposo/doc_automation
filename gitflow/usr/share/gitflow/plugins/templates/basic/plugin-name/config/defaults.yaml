@@ -1,0 +1,23 @@
+# Default plugin configuration
+timeout: 30
+retry_count: 3
+
+# config/schema.json
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "timeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "default": 30
+        },
+        "retry_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 3
+        }
+    }
+}

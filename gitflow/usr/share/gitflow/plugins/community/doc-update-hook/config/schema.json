@@ -1,0 +1,40 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "required": [
+        "endpoint_url",
+       "collections_dir"
+    ],
+    "properties": {
+        "endpoint_url": {
+            "type": "string",
+            "description": "API endpoint for documentation updates"
+        },
+        "collections_dir": {
+            "type": "string",
+            "description": "Directory for Postman collections",
+            "default": "postman_collections"
+        },
+        "timeout": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 300,
+            "default": 60,
+            "description": "Timeout in seconds for API requests"
+        },
+        "retry_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3,
+            "description": "Number of retry attempts for failed requests"
+        },
+        "retry_delay": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 2,
+            "description": "Delay between retries in seconds"
+        }
+    }
+}

@@ -1,0 +1,15 @@
+{
+    "name": "version-update-hook",
+    "version": "1.0.0",
+    "description": "Manages semantic versioning for Git repositories with branch-based version control",
+    "author": "Your Name",
+    "email": "your.email@example.com",
+    "license": "MIT",
+    "events": [
+        "pre-commit",
+        "post-commit"
+    ],
+    "dependencies": {
+        "git": ">=2.34.1"
+    }
+}

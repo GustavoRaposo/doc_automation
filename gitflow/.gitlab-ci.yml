@@ -1,0 +1,84 @@
+variables:
+  DEBIAN_FRONTEND: noninteractive
+
+stages:
+  - build
+  - publish
+
+build:
+  stage: build
+  image: ubuntu:jammy
+  script:
+    - apt-get update
+    - apt-get install -y build-essential devscripts debhelper
+    # Make scripts executable
+    - chmod +x scripts/version-sync.sh scripts/build.sh
+    # Run build script
+    - scripts/build.sh
+  artifacts:
+    paths:
+      - dist/*.deb
+    expire_in: 1 week
+
+publish:
+  stage: publish
+  image: ubuntu:jammy
+  script:
+    - apt-get update
+    - apt-get install -y curl dpkg-dev
+    - |
+      REPO_PATH="debian/dists/jammy"
+
+      # Create Debian repository structure
+      mkdir -p ${REPO_PATH}/main/binary-all
+      mkdir -p ${REPO_PATH}/main/binary-amd64
+      mkdir -p debian/pool/main
+      mv dist/*.deb debian/pool/main/
+
+      # Generate Packages files
+      dpkg-scanpackages --arch all debian/pool/ > ${REPO_PATH}/main/binary-all/Packages
+      gzip -k -f ${REPO_PATH}/main/binary-all/Packages
+
+      dpkg-scanpackages --arch amd64 debian/pool/ > ${REPO_PATH}/main/binary-amd64/Packages
+      gzip -k -f ${REPO_PATH}/main/binary-amd64/Packages
+
+      # Create Release file
+      cat > ${REPO_PATH}/Release << EOF
+      Origin: Brain Robot
+      Label: Brain Robot Packages
+      Suite: jammy
+      Codename: jammy
+      Version: 1.0
+      Architectures: all amd64
+      Components: main
+      Description: Brain Robot Documentation Automation Tools
+      Date: $(date -Ru)
+      EOF
+
+      # Add hashes to Release
+      cd ${REPO_PATH}
+      echo "MD5Sum:" >> Release
+      for f in main/binary-*/Packages*; do
+        echo " $(md5sum $f | cut -d' ' -f1) $(stat -c%s $f) $f" >> Release
+      done
+      echo "SHA256:" >> Release
+      for f in main/binary-*/Packages*; do
+        echo " $(sha256sum $f | cut -d' ' -f1) $(stat -c%s $f) $f" >> Release
+      done
+      cd -
+
+      # Debug: List all files before upload
+      echo "Files to be uploaded:"
+      find debian -type f -ls
+
+      # Upload all files in the repository
+      find debian -type f -exec echo "Uploading {}" \; -exec \
+        curl --fail \
+             --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+             --header "Content-Type: application/octet-stream" \
+             --upload-file "{}" \
+             "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/debian/{}" \;
+  dependencies:
+    - build
+  only:
+    - tags

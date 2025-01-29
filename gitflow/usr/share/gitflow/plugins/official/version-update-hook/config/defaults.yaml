@@ -1,0 +1,3 @@
+tag_prefix: "v"
+retry_attempts: 3
+retry_delay: 2

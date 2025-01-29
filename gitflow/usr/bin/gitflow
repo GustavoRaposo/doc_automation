@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# Define base paths
+GITFLOW_SYSTEM_DIR="/usr/share/gitflow"
+GITFLOW_LIB_DIR="$GITFLOW_SYSTEM_DIR/lib"
+
+# Check if required directories exist
+if [ ! -d "$GITFLOW_LIB_DIR" ]; then
+    echo "❌ Error: Required library directory not found: $GITFLOW_LIB_DIR"
+    exit 1
+fi
+
+# Source required libraries with error checking
+for lib in "constants.sh" "utils.sh" "gitflow-version-control.sh" "config.sh" "hook-management.sh"; do
+    if [ ! -f "$GITFLOW_LIB_DIR/$lib" ]; then
+        echo "❌ Error: Required library not found: $lib"
+        exit 1
+    fi
+    source "$GITFLOW_LIB_DIR/$lib"
+done
+
+# Ensure config directory exists
+mkdir -p "$GITFLOW_USER_CONFIG_DIR"
+
+case "$1" in
+"--version")
+    echo "gitflow version $(get_version)"
+    ;;
+"--help")
+    cat <<EOF
+Usage: gitflow [OPTION]
+
+Options:
+--version          Show version information
+--help            Show this help message
+--install-hook    Install a hook file (--install-hook <hook_name>)
+--uninstall-hook  Remove a hook file (--uninstall-hook <hook_name>)
+--list-hooks      Show available hooks
+--show-config     Show current configuration
+--reset           Reset all configurations
+--tag-release     Tag a version as release (e.g., --tag-release v0.1.2.2 1.0)
+--set-version     Set version manually (vA.B.C.D format)
+--increment-major Increment major version number
+--get-version     Show current version
+--init-fork       Initialize a new fork (resets version to v0.0.0.0)
+
+For hook installation, use:
+gitflow --install-hook <hook_name>
+EOF
+    ;;
+"--install-hook")
+    if [ -z "$2" ]; then
+        log_error "Please provide the hook name"
+        echo "Usage: gitflow --install-hook <hook_name>"
+        list_available_hooks
+        exit 1
+    fi
+    install_specific_hook "$2"
+    ;;
+"--list-hooks")
+    list_available_hooks
+    ;;
+"--uninstall-hook")
+    if [ -z "$2" ]; then
+        log_error "Please provide the hook name"
+        echo "Usage: gitflow --uninstall-hook <hook_name>"
+        exit 1
+    fi
+    uninstall_hook "$2"
+    ;;
+"--show-config")
+    show_config
+    ;;
+"--reset")
+    read -p "⚠️  Are you sure you want to reset all configurations? (y/N) " confirm
+    if [[ $confirm =~ ^[Yy]$ ]]; then
+        rm -f "$GITFLOW_USER_CONFIG"
+        log_success "Configuration reset successfully!"
+        echo "Run 'gitflow --config' to reconfigure."
+    else
+        echo "Reset cancelled."
+    fi
+    ;;
+"--tag-release")
+    if [ -z "$2" ] || [ -z "$3" ]; then
+        log_error "Please provide both version and release name"
+        echo "Usage: gitflow --tag-release <version> <release_name>"
+        echo "Example: gitflow --tag-release v0.1.2.2 1.0"
+        exit 1
+    fi
+    tag_release "$2" "$3"
+    ;;
+"--init-fork")
+    init_fork
+    ;;
+"--set-version")
+    if [ -z "$2" ]; then
+        log_error "Please provide the version number"
+        echo "Usage: gitflow --set-version vA.B.C.D"
+        exit 1
+    fi
+    set_version "$2"
+    ;;
+"--increment-major")
+    increment_major
+    ;;
+"--get-version")
+    echo "Current version: $(get_version)"
+    ;;
+"")
+    gitflow --help
+    log_info "To install hooks, use --install-hook <hook_name>"
+    log_info "To see available hooks, use --list-hooks"
+    ;;
+*)
+    log_error "Unknown option: $1"
+    echo "Run 'gitflow --help' for usage information"
+    exit 1
+    ;;
+esac
+
+exit 0

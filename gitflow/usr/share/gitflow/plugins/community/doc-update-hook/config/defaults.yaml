@@ -1,0 +1,5 @@
+endpoint_url: ""
+collections_dir: "postman_collections"
+timeout: 60
+retry_attempts: 3
+retry_delay: 2

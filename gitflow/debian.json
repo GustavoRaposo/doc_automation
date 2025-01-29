@@ -1,0 +1,8 @@
+{
+  "distribution": "jammy",
+  "component": "main",
+  "architectures": ["all"],
+  "description": "Brain Robot Documentation Automation Tools",
+  "origin": "Brain Robot",
+  "label": "Brain Robot Packages"
+}

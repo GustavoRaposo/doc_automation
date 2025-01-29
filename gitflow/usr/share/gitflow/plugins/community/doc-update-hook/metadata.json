@@ -1,0 +1,25 @@
+{
+    "name": "doc-update-hook",
+    "version": "1.0.0",
+    "description": "Automatically updates API documentation and manages Postman collections",
+    "author": "Your Name",
+    "email": "your.email@example.com",
+    "license": "MIT",
+    "events": [
+        "post-commit"
+    ],
+    "dependencies": {
+        "git": ">=2.34.1",
+        "python3": ">=3.8.0",
+        "curl": ">=7.0.0"
+    },
+    "configurations": {
+        "required": [
+            "endpoint_url",
+            "collections_dir"
+        ],
+        "optional": [
+            "timeout"
+        ]
+    }
+}

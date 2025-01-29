@@ -1,0 +1,25 @@
+{
+    "name": "plugin-name",
+    "version": "1.0.0",
+    "description": "Plugin description",
+    "author": "Your Name",
+    "email": "your.email@example.com",
+    "license": "MIT",
+    "events": [
+        "pre-commit",
+        "post-commit"
+    ],
+    "dependencies": {
+        "git": ">=2.34.1"
+    },
+    "configurations": {
+        "required": [],
+        "optional": [
+            "timeout"
+        ]
+    },
+    "tmp_cleanup": {
+        "max_age_minutes": 60,
+        "cleanup_on_exit": true
+    }
+}

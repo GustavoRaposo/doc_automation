@@ -1,0 +1,22 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "tag_prefix": {
+            "type": "string",
+            "default": "v"
+        },
+        "retry_attempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+        },
+        "retry_delay": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 2
+        }
+    }
+}
