@@ -19,9 +19,9 @@ override_dh_auto_install:
 	
 	# Copy files with path preservation
 	cp -r usr/share/gitflow/lib/* $(INSTALL_ROOT)/lib/
-	cp -r usr/share/gitflow/plugins/official $(PLUGIN_ROOT)/
-	cp -r usr/share/gitflow/plugins/community $(PLUGIN_ROOT)/
-	cp -r usr/share/gitflow/plugins/templates $(PLUGIN_ROOT)/
+	cp -r usr/share/gitflow/plugins/official/* $(PLUGIN_ROOT)/official/ || true
+	cp -r usr/share/gitflow/plugins/community/* $(PLUGIN_ROOT)/community/ || true
+	cp -r usr/share/gitflow/plugins/templates/* $(PLUGIN_ROOT)/templates/ || true
 	cp usr/bin/gitflow $(PACKAGE_ROOT)/usr/bin/
 	
 	# Initialize plugin registry with proper permissions
@@ -35,18 +35,17 @@ override_dh_auto_install:
 	chmod 755 $(PACKAGE_ROOT)/usr/bin/gitflow
 
 override_dh_fixperms:
-    dh_fixperms
-    # Set specific permissions after dh_fixperms
-    find $(PACKAGE_ROOT) -type d -exec chmod 755 {} \;
-    find $(PACKAGE_ROOT) -type f -name "*.sh" -exec chmod 755 {} \;
-    find $(PACKAGE_ROOT) -type f ! -name "*.sh" -exec chmod 644 {} \;
-    chmod 755 $(PACKAGE_ROOT)/usr/bin/gitflow
-    chmod 755 $(PLUGIN_ROOT)
-    chmod 755 $(PLUGIN_ROOT)/metadata
-    chmod 666 $(PLUGIN_ROOT)/metadata/plugins.json
-    chmod -R 755 $(PLUGIN_ROOT)/official
-    chmod -R 755 $(PLUGIN_ROOT)/community
-    chmod -R 755 $(PLUGIN_ROOT)/templates
+	dh_fixperms
+	# Set specific permissions after dh_fixperms
+	find $(PACKAGE_ROOT) -type d -exec chmod 755 {} \;
+	find $(PACKAGE_ROOT) -type f -name "*.sh" -exec chmod 755 {} \;
+	find $(PACKAGE_ROOT) -type f ! -name "*.sh" -exec chmod 644 {} \;
+	chmod 755 $(PACKAGE_ROOT)/usr/bin/gitflow
+	chmod 755 $(PLUGIN_ROOT)
+	chmod 755 $(PLUGIN_ROOT)/metadata
+	chmod 666 $(PLUGIN_ROOT)/metadata/plugins.json
+	chmod -R 755 $(PLUGIN_ROOT)/official
+	chmod -R 755 $(PLUGIN_ROOT)/templates
 
 # Clean target override to ensure proper cleanup
 override_dh_clean:

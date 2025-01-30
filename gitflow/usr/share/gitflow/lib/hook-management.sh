@@ -192,20 +192,53 @@ register_plugin() {
     # Refresh registry first
     refresh_plugin_registry
     
-    # Read current registry
-    local registry_content=$(cat "$GITFLOW_PLUGINS_REGISTRY")
+    # Make sure registry directory exists
+    local registry_dir=$(dirname "$GITFLOW_PLUGINS_REGISTRY")
+    [ ! -d "$registry_dir" ] && sudo mkdir -p "$registry_dir"
     
-    # Update installed status for the plugin
-    registry_content=$(echo "$registry_content" | jq --arg name "$plugin_name" \
-        '.plugins[$name].installed = true')
-    
-    # Write updated registry
-    if ! echo "$registry_content" | sudo tee "$GITFLOW_PLUGINS_REGISTRY" > /dev/null; then
-        log_error "Failed to update plugin registry"
-        return 1
+    # Read current registry or create new if doesn't exist
+    local registry_content="{}"
+    if [ -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
+        registry_content=$(cat "$GITFLOW_PLUGINS_REGISTRY")
     fi
     
+    # Get plugin metadata
+    local plugin_dir
+    if [ "$plugin_type" = "official" ]; then
+        plugin_dir="$GITFLOW_OFFICIAL_PLUGINS_DIR/$plugin_name"
+    else
+        plugin_dir="$GITFLOW_COMMUNITY_PLUGINS_DIR/$plugin_name"
+    fi
+    
+    local metadata_file="$plugin_dir/metadata.json"
+    local version=""
+    local description=""
+    local author=""
+    
+    if [ -f "$metadata_file" ]; then
+        version=$(jq -r '.version // ""' "$metadata_file")
+        description=$(jq -r '.description // ""' "$metadata_file")
+        author=$(jq -r '.author // ""' "$metadata_file")
+    fi
+    
+    # Update registry with plugin information
+    registry_content=$(echo "$registry_content" | jq --arg name "$plugin_name" \
+        --arg type "$plugin_type" \
+        --arg version "$version" \
+        --arg description "$description" \
+        --arg author "$author" \
+        '.plugins[$name] = {
+            "type": $type,
+            "installed": true,
+            "version": $version,
+            "description": $description,
+            "author": $author
+        }')
+    
+    # Write updated registry with proper permissions
+    echo "$registry_content" | sudo tee "$GITFLOW_PLUGINS_REGISTRY" > /dev/null
     sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
+    
     log_success "Plugin $plugin_name registered successfully"
     return 0
 }
@@ -267,46 +300,123 @@ create_plugin() {
     echo "Edit metadata.json and implement your hook logic in events/"
 }
 
+# Debug helper function to validate plugin structure
+debug_plugin_directory() {
+    local plugin_dir="$1"
+    log_info "Verifying plugin structure in: $plugin_dir"
+    
+    # Check basic directory structure
+    local required_dirs=(
+        "events"
+        "lib"
+    )
+    
+    # Debug info
+    echo "Plugin directory contents:"
+    find "$plugin_dir" -type f -exec ls -l {} \;
+    
+    for dir in "${required_dirs[@]}"; do
+        if [ ! -d "$plugin_dir/$dir" ]; then
+            log_warning "Missing directory: $dir"
+        else
+            log_info "Found directory: $dir"
+            
+            # For events directory, check event scripts
+            if [ "$dir" = "events" ]; then
+                if [ -d "$plugin_dir/$dir" ]; then
+                    echo "Events directory contents:"
+                    find "$plugin_dir/events" -type f -exec ls -l {} \;
+                    
+                    for event_dir in "$plugin_dir/$dir"/*; do
+                        [ ! -d "$event_dir" ] && continue
+                        
+                        local event_name=$(basename "$event_dir")
+                        local script_file="$event_dir/script.sh"
+                        
+                        if [ -f "$script_file" ]; then
+                            log_info "Found event script: $event_name/script.sh"
+                            echo "=== $script_file ==="
+                            cat "$script_file"
+                            echo "================"
+                            
+                            if [ ! -x "$script_file" ]; then
+                                log_warning "Script not executable: $event_name/script.sh"
+                                chmod +x "$script_file"
+                            fi
+                        else
+                            log_warning "Missing script for event: $event_name"
+                        fi
+                    done
+                else
+                    log_warning "Events directory does not exist"
+                fi
+            fi
+        fi
+    done
+    
+    # Check metadata file
+    local metadata_file="$plugin_dir/metadata.json"
+    if [ -f "$metadata_file" ]; then
+        log_info "Found metadata.json"
+        if ! jq empty "$metadata_file" 2>/dev/null; then
+            log_warning "Invalid JSON in metadata.json"
+        else
+            log_info "metadata.json content:"
+            cat "$metadata_file"
+        fi
+    else
+        log_warning "Missing metadata.json"
+    fi
+}
+
 install_specific_hook() {
     local hook_name="$1"
     local repo_root
     repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
     
-    [ ! -d "$repo_root/.git" ] && log_error "Not a git repository" && return 1
+    if [ ! -d "$repo_root/.git" ]; then
+        log_error "Not a git repository"
+        return 1
+    fi
     
     log_info "Installing hook: $hook_name"
     log_info "Repository root: $repo_root"
     
-    # Use test or system paths based on environment
-    local plugins_dir="${GITFLOW_PLUGINS_DIR:-$GITFLOW_SYSTEM_DIR/plugins}"
-    local registry="${GITFLOW_PLUGINS_REGISTRY:-$plugins_dir/metadata/plugins.json}"
+    # Try to resolve plugin path and type
+    local plugin_dir
+    local plugin_type
     
-    # Refresh plugin registry
-    refresh_plugin_registry
-    
-    # Check if plugin exists in registry and is an official plugin
-    if ! jq -e ".plugins[\"$hook_name\"] | select(.type == \"official\")" "$registry" >/dev/null 2>&1; then
-        log_error "Official hook plugin $hook_name not found"
+    # First try official plugins
+    if plugin_dir=$(resolve_plugin_path "official" "$hook_name"); then
+        plugin_type="official"
+    # Then try community plugins
+    elif plugin_dir=$(resolve_plugin_path "community" "$hook_name"); then
+        plugin_type="community"
+    else
+        log_error "Plugin not found: $hook_name"
+        log_info "Searched paths:"
+        log_info "  - $GITFLOW_OFFICIAL_PLUGINS_DIR/$hook_name"
+        log_info "  - $GITFLOW_COMMUNITY_PLUGINS_DIR/$hook_name"
+        log_info "  - /usr/share/gitflow/plugins/{official,community}/$hook_name"
         return 1
     fi
     
-    # Get plugin directory
-    local plugin_dir="$plugins_dir/official/$hook_name"
-    
-    log_info "Plugin directory: $plugin_dir"
-    
-    # Verify plugin directory exists
-    if [ ! -d "$plugin_dir" ]; then
-        log_error "Plugin directory not found: $plugin_dir"
-        return 1
-    fi
+    # Store the resolved plugin directory for consistent usage
+    local resolved_plugin_dir="$plugin_dir"
+    log_info "Plugin directory: $resolved_plugin_dir"
     
     # Register plugin as installed
-    register_plugin "$hook_name" "official"
+    if ! register_plugin "$hook_name" "$plugin_type"; then
+        log_error "Failed to register plugin: $hook_name"
+        return 1
+    fi
+    
+    # Debug plugin directory structure using the resolved path
+    debug_plugin_directory "$resolved_plugin_dir"
     
     # Install hook scripts
     local hook_installed=0
-    local event_dir="$plugin_dir/events"
+    local event_dir="$resolved_plugin_dir/events"
     
     if [ ! -d "$event_dir" ]; then
         log_error "Events directory not found: $event_dir"
@@ -323,25 +433,35 @@ install_specific_hook() {
         local hook_file="$repo_root/.git/hooks/$event_name"
         
         if [ ! -f "$script_file" ]; then
+            log_warning "Script file not found: $script_file"
             continue
         fi
         
         # Create or update hook file
+        mkdir -p "$(dirname "$hook_file")"
         if [ ! -f "$hook_file" ]; then
             echo '#!/bin/bash' > "$hook_file"
         fi
         chmod +x "$hook_file"
         
-        # Add hook content if not already present
-        if ! grep -q "# Begin $hook_name" "$hook_file"; then
-            {
-                echo
-                echo "# Begin $hook_name"
-                cat "$script_file"
-                echo "# End $hook_name"
-            } >> "$hook_file"
+        # Check if hook is already installed for this plugin
+        if grep -q "# Begin $hook_name" "$hook_file"; then
+            log_info "Hook $event_name already installed for $hook_name"
             ((hook_installed++))
+            continue
         fi
+        
+        # Add hook content
+        {
+            echo
+            echo "# Begin $hook_name"
+            echo "export GITFLOW_PLUGIN_DIR=\"$resolved_plugin_dir\""
+            echo "export GITFLOW_PLUGIN_TYPE=\"$plugin_type\""
+            cat "$script_file"
+            echo "# End $hook_name"
+        } >> "$hook_file"
+        ((hook_installed++))
+        log_success "Installed $event_name hook from $hook_name"
     done
     
     if [ $hook_installed -eq 0 ]; then

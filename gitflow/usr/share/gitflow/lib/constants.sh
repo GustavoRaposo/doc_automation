@@ -44,18 +44,28 @@ resolve_plugin_path() {
         fi
     fi
     
-    # Regular environment paths
-    local paths=(
-        "$GITFLOW_PLUGINS_DIR/$plugin_type/$plugin_name"
-        "/usr/share/gitflow/plugins/$plugin_type/$plugin_name"
-    )
-    
-    for path in "${paths[@]}"; do
-        if [ -d "$path" ]; then
-            echo "$path"
+    # Development environment
+    if [ -n "$GITFLOW_WORK_DIR" ]; then
+        local dev_path="$GITFLOW_WORK_DIR/usr/share/gitflow/plugins/$plugin_type/$plugin_name"
+        if [ -d "$dev_path" ]; then
+            echo "$dev_path"
             return 0
         fi
-    done
+    fi
+    
+    # Project root check for development
+    local project_path="$PROJECT_ROOT/usr/share/gitflow/plugins/$plugin_type/$plugin_name"
+    if [ -d "$project_path" ]; then
+        echo "$project_path"
+        return 0
+    fi
+    
+    # System installation path
+    local sys_path="/usr/share/gitflow/plugins/$plugin_type/$plugin_name"
+    if [ -d "$sys_path" ]; then
+        echo "$sys_path"
+        return 0
+    fi
     
     return 1
 }
@@ -87,6 +97,26 @@ else
     GITFLOW_VERSION_FILE=".git/version-control/.version"
     GITFLOW_BRANCH_VERSIONS_FILE=".git/version-control/.branch_versions"
 fi
+
+resolve_plugin_type() {
+    local plugin_name="$1"
+    
+    # Check official plugins first
+    if [ -d "$GITFLOW_OFFICIAL_PLUGINS_DIR/$plugin_name" ]; then
+        echo "official"
+        return 0
+    fi
+    
+    # Then check community plugins
+    if [ -d "$GITFLOW_COMMUNITY_PLUGINS_DIR/$plugin_name" ]; then
+        echo "community" 
+        return 0
+    fi
+    
+    return 1
+}
+
+export -f resolve_plugin_type
 
 # Initialize registry function
 initialize_registry() {
@@ -131,6 +161,7 @@ validate_plugin_registry() {
 
     # Ensure registry exists and is writable
     if [ ! -f "$GITFLOW_PLUGINS_REGISTRY" ] || [ ! -s "$GITFLOW_PLUGINS_REGISTRY" ]; then
+        sudo mkdir -p "$(dirname "$GITFLOW_PLUGINS_REGISTRY")"
         echo '{"plugins":{}}' | sudo tee "$GITFLOW_PLUGINS_REGISTRY" > /dev/null
         sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
     fi

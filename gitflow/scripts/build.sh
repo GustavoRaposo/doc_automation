@@ -183,6 +183,7 @@ create_package_structure() {
         "debian/gitflow/usr/share/gitflow/lib"
         "debian/gitflow/usr/share/gitflow/plugins/official"
         "debian/gitflow/usr/share/gitflow/plugins/metadata"
+        "debian/gitflow/usr/share/gitflow/plugins/community"
         "debian/gitflow/usr/bin"
         "debian/gitflow/etc/gitflow"
     )

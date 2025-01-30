@@ -3,4 +3,5 @@ usr/share/gitflow
 usr/share/gitflow/lib
 usr/share/gitflow/plugins/official
 usr/share/gitflow/plugins/metadata
+usr/share/gitflow/plugins/community
 etc/gitflow
