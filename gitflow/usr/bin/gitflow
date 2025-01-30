@@ -12,24 +12,19 @@ detect_system_paths() {
     local script_path="$(readlink -f "$0")"
     local script_dir="$(dirname "$script_path")"
     local system_dir=""
-    local config_dir=""
-
+    
     # Test environment takes precedence
     if [ -n "$GITFLOW_TEST_ENV" ]; then
         system_dir="$GITFLOW_TEST_DIR/usr/share/gitflow"
-        config_dir="$GITFLOW_TEST_DIR/etc/gitflow"
     # Build environment check
     elif [ -n "$GITFLOW_WORK_DIR" ]; then
         system_dir="$GITFLOW_WORK_DIR/usr/share/gitflow"
-        config_dir="$GITFLOW_WORK_DIR/etc/gitflow"
     # System installation
     elif [ -d "/usr/share/gitflow" ]; then
         system_dir="/usr/share/gitflow"
-        config_dir="/etc/gitflow"
     # Development environment
     elif [ -d "$script_dir/../share/gitflow" ]; then
         system_dir="$script_dir/../share/gitflow"
-        config_dir="$script_dir/../etc/gitflow"
     else
         echo "❌ Error: Unable to locate gitflow installation" >&2
         exit 1
@@ -38,26 +33,24 @@ detect_system_paths() {
     # Export detected paths
     export GITFLOW_SYSTEM_DIR="$system_dir"
     export GITFLOW_LIB_DIR="$system_dir/lib"
-    export GITFLOW_CONFIG_DIR="$config_dir"
-    export GITFLOW_USER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gitflow"
 }
 
 # Initialize system paths
 detect_system_paths
 
-# Source required library files with improved error handling
+# Source required libraries with error handling
 source_library() {
     local lib="$1"
     local lib_path="$GITFLOW_LIB_DIR/$lib"
     
     if [ ! -f "$lib_path" ]; then
         echo "❌ Library not found: $lib" >&2
-        echo "Expected path: $lib_path" >&2
+        echo "Looking in: $lib_path" >&2
         return 1
     fi
 
     if ! source "$lib_path" 2>/dev/null; then
-        echo "❌ Failed to source $lib" >&2
+        echo "❌ Failed to source library: $lib" >&2
         return 1
     fi
 
@@ -66,11 +59,10 @@ source_library() {
 
 # Required libraries in load order
 declare -a required_libs=(
-    "constants.sh"    # Must be first for path definitions
-    "utils.sh"        # Logging and utility functions
-    "config.sh"       # Configuration management
-    "hook-management.sh"  # Hook management functions
-    "git.sh"         # Git-specific utilities
+    "constants.sh"
+    "utils.sh"
+    "git.sh"
+    "hook-management.sh"
 )
 
 # Source each library
@@ -81,11 +73,7 @@ for lib in "${required_libs[@]}"; do
     fi
 done
 
-# Ensure config directories exist with proper permissions
-mkdir -p "$GITFLOW_USER_CONFIG_DIR" 2>/dev/null || true
-chmod 700 "$GITFLOW_USER_CONFIG_DIR" 2>/dev/null || true
-
-# Check if we're in a git repository for git-specific commands
+# Check if we're in a git repository
 check_git_repo() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         log_error "Not a git repository"
@@ -93,264 +81,113 @@ check_git_repo() {
     fi
 }
 
-# Command help functions
-show_main_help() {
+show_help() {
     cat <<EOF
-Usage: gitflow <command> [subcommand] [options]
+GitFlow Hook Manager - Modular Git Hook Management
 
-Core Commands:
-  hook       Manage Git hooks
-  plugin     Manage plugins
-  config     Configure gitflow settings
+Usage: 
+  gitflow <command> <hook-name> [options]
 
-Run 'gitflow <command> --help' for command-specific help
-EOF
-}
-
-show_hook_help() {
-    cat <<EOF
-Usage: gitflow hook <subcommand> [options]
-
-Subcommands:
-  install    Install a hook (e.g., gitflow hook install pre-commit)
-  uninstall  Remove a hook
-  list       Show available hooks
-  update     Update installed hooks
-  status     Show hook status
+Commands:
+  install     Install a hook (e.g., gitflow install doc-update-hook)
+  uninstall   Remove a hook
+  reinstall   Reinstall a hook (combines uninstall and install)
+  list        Show available hooks
+  config      Configure a specific hook's settings
 
 Options:
-  --force    Force operation
-  --all      Apply to all hooks
+  --help     Show this help message
+  --version  Show version information
+  --force    Force operation (with install/uninstall)
+
+Examples:
+  gitflow install doc-update-hook    Install the doc-update hook
+  gitflow uninstall pre-commit      Uninstall the pre-commit hook
+  gitflow list                      Show all available hooks
+  gitflow config doc-update-hook    Configure doc-update hook settings
+
+For more information, visit: https://github.com/yourusername/gitflow
 EOF
 }
 
-show_plugin_help() {
-    cat <<EOF
-Usage: gitflow plugin <subcommand> [options]
-
-Subcommands:
-  install    Install a plugin
-  uninstall  Remove a plugin
-  list       Show installed plugins
-  update     Update plugins
-  config     Configure plugin settings
-
-Options:
-  --force    Force operation
-  --all      Apply to all plugins
-EOF
-}
-
-show_config_help() {
-    cat <<EOF
-Usage: gitflow config <subcommand> [options]
-
-Subcommands:
-  show       Show current configuration
-  edit       Edit configuration
-  reset      Reset configuration
-  set        Set specific configuration value
-
-Options:
-  --global   Apply to global configuration
-  --local    Apply to local repository only
-EOF
-}
-
-# Hook management functions with improved error handling
-handle_hook_command() {
-    local subcommand=$1
-    shift
-
-    case "$subcommand" in
-        "install")
-            [ -z "$1" ] && { log_error "Hook name required"; show_hook_help; exit 1; }
-            check_git_repo
-            if ! install_specific_hook "$1"; then
-                log_error "Failed to install hook: $1"
-                exit 1
-            fi
-            ;;
-        "uninstall")
-            [ -z "$1" ] && { log_error "Hook name required"; show_hook_help; exit 1; }
-            check_git_repo
-            if ! uninstall_hook "$1"; then
-                log_error "Failed to uninstall hook: $1"
-                exit 1
-            fi
-            ;;
-        "list")
-            list_available_hooks
-            ;;
-        "update")
-            check_git_repo
-            if ! update_installed_hooks "$@"; then
-                log_error "Failed to update hooks"
-                exit 1
-            fi
-            ;;
-        "status")
-            check_git_repo
-            show_hook_status
-            ;;
-        "--help")
-            show_hook_help
-            ;;
-        *)
-            log_error "Unknown hook subcommand: $subcommand"
-            show_hook_help
-            exit 1
-            ;;
-    esac
-}
-
-# Plugin management functions with improved error handling
-handle_plugin_command() {
-    local subcommand=$1
-    shift
-
-    case "$subcommand" in
-        "install")
-            [ -z "$1" ] && { log_error "Plugin name required"; show_plugin_help; exit 1; }
-            if ! install_plugin "$1"; then
-                log_error "Failed to install plugin: $1"
-                exit 1
-            fi
-            ;;
-        "uninstall")
-            [ -z "$1" ] && { log_error "Plugin name required"; show_plugin_help; exit 1; }
-            if ! uninstall_plugin "$1"; then
-                log_error "Failed to uninstall plugin: $1"
-                exit 1
-            fi
-            ;;
-        "list")
-            list_installed_plugins
-            ;;
-        "update")
-            if ! update_plugins "$@"; then
-                log_error "Failed to update plugins"
-                exit 1
-            fi
-            ;;
-        "config")
-            if ! configure_plugin "$@"; then
-                log_error "Failed to configure plugin"
-                exit 1
-            fi
-            ;;
-        "--help")
-            show_plugin_help
-            ;;
-        *)
-            log_error "Unknown plugin subcommand: $subcommand"
-            show_plugin_help
-            exit 1
-            ;;
-    esac
-}
-
-# Configuration management functions with improved error handling
-handle_config_command() {
-    local subcommand=$1
-    shift
-
-    case "$subcommand" in
-        "show")
-            if [ -f "$GITFLOW_USER_CONFIG" ]; then
-                echo "📝 Current configuration:"
-                echo "------------------------"
-                cat "$GITFLOW_USER_CONFIG" | sed 's/^/  /'
-            else
-                log_warning "No configuration found"
-            fi
-            ;;
-        "edit")
-            EDITOR=${EDITOR:-${VISUAL:-vi}}
-            if ! $EDITOR "$GITFLOW_USER_CONFIG"; then
-                log_error "Failed to edit configuration"
-                exit 1
-            fi
-            ;;
-        "reset")
-            read -p "⚠️  Are you sure you want to reset configuration? (y/N) " confirm
-            if [[ $confirm =~ ^[Yy]$ ]]; then
-                if ! rm -f "$GITFLOW_USER_CONFIG"; then
-                    log_error "Failed to reset configuration"
-                    exit 1
-                fi
-                log_success "Configuration reset successfully"
-            else
-                echo "Reset cancelled"
-            fi
-            ;;
-        "set")
-            if [ -z "$1" ]; then
-                log_error "Configuration key required"
-                show_config_help
-                exit 1
-            fi
-            local key="$1"
-            local value="$2"
-            if [ -z "$value" ]; then
-                read -p "Enter value for $key: " value
-            fi
-            
-            if ! mkdir -p "$(dirname "$GITFLOW_USER_CONFIG")"; then
-                log_error "Failed to create configuration directory"
-                exit 1
-            fi
-            
-            if [ -f "$GITFLOW_USER_CONFIG" ] && grep -q "^${key}=" "$GITFLOW_USER_CONFIG"; then
-                if ! sed -i "s|^${key}=.*|${key}=${value}|" "$GITFLOW_USER_CONFIG"; then
-                    log_error "Failed to update configuration"
-                    exit 1
-                fi
-            else
-                if ! echo "${key}=${value}" >> "$GITFLOW_USER_CONFIG"; then
-                    log_error "Failed to write configuration"
-                    exit 1
-                fi
-            fi
-            log_success "Configuration updated: ${key}=${value}"
-            ;;
-        "--help")
-            show_config_help
-            ;;
-        *)
-            log_error "Unknown config subcommand: $subcommand"
-            show_config_help
-            exit 1
-            ;;
-    esac
+show_version() {
+    echo "GitFlow Hook Manager v0.1.0"
+    echo "Copyright (c) 2024 GitFlow Maintainers"
 }
 
 # Main command processing
 main() {
-    [ -z "$1" ] && { show_main_help; exit 0; }
+    [ -z "$1" ] && { show_help; exit 0; }
 
     case "$1" in
-        "hook")
+        "install")
             shift
-            handle_hook_command "$@"
+            if [ -z "$1" ]; then
+                log_error "Hook name required"
+                echo "Usage: gitflow install <hook-name>"
+                exit 1
+            fi
+            check_git_repo
+            install_specific_hook "$1"
             ;;
-        "plugin")
+            
+        "uninstall")
             shift
-            handle_plugin_command "$@"
+            if [ -z "$1" ]; then
+                log_error "Hook name required"
+                echo "Usage: gitflow uninstall <hook-name>"
+                exit 1
+            fi
+            check_git_repo
+            uninstall_hook "$1"
             ;;
+            
+        "reinstall")
+            shift
+            if [ -z "$1" ]; then
+                log_error "Hook name required"
+                echo "Usage: gitflow reinstall <hook-name>"
+                exit 1
+            fi
+            check_git_repo
+            if uninstall_hook "$1"; then
+                install_specific_hook "$1"
+            else
+                log_error "Failed to reinstall hook: $1"
+                exit 1
+            fi
+            ;;
+            
+        "list")
+            list_available_hooks
+            ;;
+            
         "config")
             shift
-            handle_config_command "$@"
+            if [ -z "$1" ]; then
+                log_error "Hook name required"
+                echo "Usage: gitflow config <hook-name>"
+                exit 1
+            fi
+            check_git_repo
+            if ! configure_hook "$1"; then
+                log_error "Failed to configure hook: $1"
+                exit 1
+            fi
             ;;
+            
         "--help")
-            show_main_help
+            show_help
             ;;
+            
         "--version")
-            echo "gitflow version 0.1.0"
+            show_version
             ;;
+            
         *)
             log_error "Unknown command: $1"
-            show_main_help
+            echo
+            show_help
             exit 1
             ;;
     esac

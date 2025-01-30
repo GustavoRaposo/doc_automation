@@ -40,7 +40,6 @@ main() {
     # Define test order with priorities
     local test_files=(
         "test_system.sh"
-        "test_config.sh"
         "test_hook_management.sh"
     )
     

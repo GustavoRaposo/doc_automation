@@ -37,9 +37,12 @@ setup_test_env() {
     mkdir -p "$GITFLOW_PLUGINS_DIR/community"
     mkdir -p "$GITFLOW_PLUGINS_DIR/templates/basic"
     mkdir -p "$GITFLOW_PLUGIN_METADATA_DIR"
+    mkdir -p "$TEST_DIR/usr/bin"
     
     # Copy required files
     cp -r "$PROJECT_ROOT/usr/share/gitflow/lib/"* "$GITFLOW_LIB_DIR/"
+    cp "$PROJECT_ROOT/usr/bin/gitflow" "$TEST_DIR/usr/bin/"
+    chmod 755 "$TEST_DIR/usr/bin/gitflow"
     
     # Set proper permissions
     find "$TEST_DIR" -type d -exec chmod 755 {} \;

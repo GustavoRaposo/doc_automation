@@ -1,4 +1,3 @@
-#!/bin/bash
 set -e
 
 # Source path definitions
@@ -13,15 +12,49 @@ case "$1" in
         mkdir -p "$GITFLOW_PLUGIN_METADATA_DIR"
         chmod 755 "$GITFLOW_PLUGIN_METADATA_DIR"
         
-        # Initialize plugins registry
-        echo '{"plugins":{}}' > "$GITFLOW_PLUGINS_REGISTRY"
+        # Initialize registry by scanning available plugins
+        TEMP_REGISTRY=$(mktemp)
+        echo '{"plugins":{}}' > "$TEMP_REGISTRY"
+        
+        # Scan both official and community plugins
+        for plugin_type in official community; do
+            PLUGINS_DIR="$GITFLOW_PLUGINS_DIR/$plugin_type"
+            [ ! -d "$PLUGINS_DIR" ] && continue
+            
+            for plugin_dir in "$PLUGINS_DIR"/*; do
+                [ ! -d "$plugin_dir" ] && continue
+                
+                plugin_name=$(basename "$plugin_dir")
+                metadata_file="$plugin_dir/metadata.json"
+                
+                if [ -f "$metadata_file" ] && jq empty "$metadata_file" 2>/dev/null; then
+                    version=$(jq -r '.version // ""' "$metadata_file")
+                    description=$(jq -r '.description // ""' "$metadata_file")
+                    author=$(jq -r '.author // ""' "$metadata_file")
+                    
+                    # Set installed=false by default for all plugins
+                    registry_content=$(jq --arg name "$plugin_name" \
+                        --arg type "$plugin_type" \
+                        --arg version "$version" \
+                        --arg description "$description" \
+                        --arg author "$author" \
+                        '.plugins[$name] = {
+                            "type": $type,
+                            "installed": false,
+                            "version": $version,
+                            "description": $description,
+                            "author": $author
+                        }' "$TEMP_REGISTRY")
+                    
+                    echo "$registry_content" > "$TEMP_REGISTRY"
+                fi
+            done
+        done
+        
+        # Install final registry
+        mv "$TEMP_REGISTRY" "$GITFLOW_PLUGINS_REGISTRY"
         chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
-        
-        # Set ownership
-        chown -R root:root "$GITFLOW_SYSTEM_DIR"
-        
-        # Set permissions for executables
-        find "$GITFLOW_SYSTEM_DIR" -type f -name "*.sh" -exec chmod 755 {} \;
+        chown root:root "$GITFLOW_PLUGINS_REGISTRY"
         ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

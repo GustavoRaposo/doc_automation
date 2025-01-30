@@ -117,42 +117,58 @@ scan_and_register_plugins() {
     local registry_content='{"plugins":{}}'
     local temp_file=$(mktemp)
 
-    # Initialize registry with empty structure
+    # Create empty registry structure
     echo "$registry_content" > "$temp_file"
 
-    # Only scan official plugins
-    local plugins_dir="$GITFLOW_PLUGINS_DIR/official"
-    [ ! -d "$plugins_dir" ] && return 0
+    # Preserve existing installation status if registry exists
+    local existing_installations="{}"
+    if [ -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
+        existing_installations=$(jq '.plugins | map_values(.installed)' "$GITFLOW_PLUGINS_REGISTRY")
+    fi
 
-    for plugin_dir in "$plugins_dir"/*; do
-        [ ! -d "$plugin_dir" ] && continue
-        
-        local plugin_name=$(basename "$plugin_dir")
-        local metadata_file="$plugin_dir/metadata.json"
-        
-        if [ -f "$metadata_file" ] && jq empty "$metadata_file" 2>/dev/null; then
-            # Get plugin metadata
-            local metadata=$(cat "$metadata_file")
-            local version=$(echo "$metadata" | jq -r '.version // ""')
-            local description=$(echo "$metadata" | jq -r '.description // ""')
-            local author=$(echo "$metadata" | jq -r '.author // ""')
+    # Scan both official and community plugins
+    for plugin_type in official community; do
+        local plugins_dir="$GITFLOW_PLUGINS_DIR/$plugin_type"
+        [ ! -d "$plugins_dir" ] && continue
+
+        for plugin_dir in "$plugins_dir"/*; do
+            [ ! -d "$plugin_dir" ] && continue
             
-            # Update registry with plugin information
-            registry_content=$(echo "$registry_content" | jq --arg name "$plugin_name" \
-                --arg version "$version" \
-                --arg description "$description" \
-                --arg author "$author" \
-                '.plugins[$name] = {
-                    "type": "official",
-                    "installed": false,
-                    "version": $version,
-                    "description": $description,
-                    "author": $author
-                }')
-        fi
+            local plugin_name=$(basename "$plugin_dir")
+            local metadata_file="$plugin_dir/metadata.json"
+            
+            if [ -f "$metadata_file" ] && jq empty "$metadata_file" 2>/dev/null; then
+                # Get plugin metadata
+                local metadata=$(cat "$metadata_file")
+                local version=$(echo "$metadata" | jq -r '.version // ""')
+                local description=$(echo "$metadata" | jq -r '.description // ""')
+                local author=$(echo "$metadata" | jq -r '.author // ""')
+                
+                # Get existing installation status or default to false
+                local installed="false"
+                if [ -n "$existing_installations" ]; then
+                    installed=$(echo "$existing_installations" | jq -r --arg name "$plugin_name" '.[$name] // "false"')
+                fi
+                
+                # Update registry with plugin information
+                registry_content=$(echo "$registry_content" | jq --arg name "$plugin_name" \
+                    --arg type "$plugin_type" \
+                    --arg version "$version" \
+                    --arg description "$description" \
+                    --arg author "$author" \
+                    --arg installed "$installed" \
+                    '.plugins[$name] = {
+                        "type": $type,
+                        "installed": $installed,
+                        "version": $version,
+                        "description": $description,
+                        "author": $author
+                    }')
+            fi
+        done
     done
 
-    # Update the plugins registry
+    # Update the plugins registry with proper permissions
     if ! echo "$registry_content" | sudo tee "$GITFLOW_PLUGINS_REGISTRY" > /dev/null; then
         log_error "Failed to update plugins registry"
         rm -f "$temp_file"
@@ -167,19 +183,65 @@ scan_and_register_plugins() {
 refresh_plugin_registry() {
     log_info "Refreshing plugin registry..."
     
-    # Ensure registry directory exists
-    local registry_dir=$(dirname "$GITFLOW_PLUGINS_REGISTRY")
-    if [ ! -d "$registry_dir" ]; then
-        sudo mkdir -p "$registry_dir"
-        sudo chmod 755 "$registry_dir"
+    local temp_file=$(mktemp)
+    local registry_content='{}'
+
+    # If registry exists, preserve installed status
+    if [ -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
+        registry_content=$(sudo cat "$GITFLOW_PLUGINS_REGISTRY")
+    else
+        registry_content='{"plugins":{}}'
     fi
 
-    # Scan and register all plugins
-    if ! scan_and_register_plugins; then
-        log_error "Failed to refresh plugin registry"
-        return 1
-    fi
+    # Create new registry content
+    echo "$registry_content" > "$temp_file"
 
+    # Process plugins
+    for plugin_type in official community; do
+        local plugins_dir="$GITFLOW_PLUGINS_DIR/$plugin_type"
+        [ ! -d "$plugins_dir" ] && continue
+
+        for plugin_dir in "$plugins_dir"/*; do
+            [ ! -d "$plugin_dir" ] && continue
+            
+            local plugin_name=$(basename "$plugin_dir")
+            local metadata_file="$plugin_dir/metadata.json"
+            
+            if [ -f "$metadata_file" ] && jq empty "$metadata_file" 2>/dev/null; then
+                # Get current installed status or default to "false"
+                local installed="false"
+                if echo "$registry_content" | jq -e ".plugins[\"$plugin_name\"]" >/dev/null; then
+                    installed=$(echo "$registry_content" | jq -r ".plugins[\"$plugin_name\"].installed")
+                fi
+                
+                # Get metadata
+                local metadata=$(cat "$metadata_file")
+                local version=$(echo "$metadata" | jq -r '.version // ""')
+                local description=$(echo "$metadata" | jq -r '.description // ""')
+                local author=$(echo "$metadata" | jq -r '.author // ""')
+                
+                # Update registry content preserving installed status
+                registry_content=$(echo "$registry_content" | jq --arg name "$plugin_name" \
+                    --arg type "$plugin_type" \
+                    --arg version "$version" \
+                    --arg description "$description" \
+                    --arg author "$author" \
+                    --arg installed "$installed" \
+                    '.plugins[$name] = {
+                        "type": $type,
+                        "installed": $installed,
+                        "version": $version,
+                        "description": $description,
+                        "author": $author
+                    }')
+            fi
+        done
+    done
+
+    # Write updated registry
+    echo "$registry_content" | sudo tee "$GITFLOW_PLUGINS_REGISTRY" > /dev/null
+    sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
+    
     log_success "Plugin registry refreshed successfully"
     return 0
 }
@@ -189,55 +251,32 @@ register_plugin() {
     local plugin_name="$1"
     local plugin_type="$2"
     
-    # Refresh registry first
-    refresh_plugin_registry
+    # Create temporary file
+    local temp_file=$(mktemp)
     
-    # Make sure registry directory exists
-    local registry_dir=$(dirname "$GITFLOW_PLUGINS_REGISTRY")
-    [ ! -d "$registry_dir" ] && sudo mkdir -p "$registry_dir"
-    
-    # Read current registry or create new if doesn't exist
-    local registry_content="{}"
     if [ -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
-        registry_content=$(cat "$GITFLOW_PLUGINS_REGISTRY")
-    fi
-    
-    # Get plugin metadata
-    local plugin_dir
-    if [ "$plugin_type" = "official" ]; then
-        plugin_dir="$GITFLOW_OFFICIAL_PLUGINS_DIR/$plugin_name"
+        # Update registry content directly with sudo
+        sudo cat "$GITFLOW_PLUGINS_REGISTRY" | \
+        jq --arg name "$plugin_name" \
+           --arg type "$plugin_type" \
+           '.plugins[$name].installed = "true"' > "$temp_file"
+
+        if ! sudo mv "$temp_file" "$GITFLOW_PLUGINS_REGISTRY"; then
+            log_error "Failed to update registry"
+            rm -f "$temp_file"
+            return 1
+        fi
+        sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
+        
+        # Verify the update
+        if ! grep -q "\"installed\": \"true\"" "$GITFLOW_PLUGINS_REGISTRY"; then
+            log_error "Failed to verify registry update"
+            return 1
+        fi
     else
-        plugin_dir="$GITFLOW_COMMUNITY_PLUGINS_DIR/$plugin_name"
+        log_error "Plugin registry not found"
+        return 1
     fi
-    
-    local metadata_file="$plugin_dir/metadata.json"
-    local version=""
-    local description=""
-    local author=""
-    
-    if [ -f "$metadata_file" ]; then
-        version=$(jq -r '.version // ""' "$metadata_file")
-        description=$(jq -r '.description // ""' "$metadata_file")
-        author=$(jq -r '.author // ""' "$metadata_file")
-    fi
-    
-    # Update registry with plugin information
-    registry_content=$(echo "$registry_content" | jq --arg name "$plugin_name" \
-        --arg type "$plugin_type" \
-        --arg version "$version" \
-        --arg description "$description" \
-        --arg author "$author" \
-        '.plugins[$name] = {
-            "type": $type,
-            "installed": true,
-            "version": $version,
-            "description": $description,
-            "author": $author
-        }')
-    
-    # Write updated registry with proper permissions
-    echo "$registry_content" | sudo tee "$GITFLOW_PLUGINS_REGISTRY" > /dev/null
-    sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
     
     log_success "Plugin $plugin_name registered successfully"
     return 0
@@ -473,6 +512,44 @@ install_specific_hook() {
     return 0
 }
 
+update_plugin_status() {
+    local plugin_name="$1"
+    local installed="$2"
+    
+    if [ ! -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
+        log_error "Plugin registry not found"
+        return 1
+    fi
+    
+    # Create temporary file for atomic write
+    local temp_file=$(mktemp)
+    
+    # Update installed status for the plugin
+    if ! jq --arg name "$plugin_name" \
+            --arg installed "$installed" \
+            '.plugins[$name].installed = $installed' \
+            "$GITFLOW_PLUGINS_REGISTRY" > "$temp_file"; then
+        log_error "Failed to generate updated registry content"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Move updated registry back with sudo
+    if ! sudo mv "$temp_file" "$GITFLOW_PLUGINS_REGISTRY"; then
+        log_error "Failed to update plugin registry (sudo mv failed)"
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Set proper permissions with sudo
+    if ! sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"; then
+        log_error "Failed to set registry permissions"
+        return 1
+    fi
+    
+    return 0
+}
+
 uninstall_hook() {
     local hook_name="$1"
     local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
@@ -481,42 +558,87 @@ uninstall_hook() {
     local hooks_dir="$repo_root/.git/hooks"
     local uninstalled=0
 
+    log_info "Uninstalling hook: $hook_name"
+    log_info "Hooks directory: $hooks_dir"
+
     # Process all hook files in .git/hooks
     for hook_file in "$hooks_dir"/*; do
         [ ! -f "$hook_file" ] && continue
+        
+        log_info "Checking hook file: $hook_file"
 
-        local tmp_file=$(mktemp)
-        local in_section=0
-        local content_written=0
+        if grep -q "# Begin $hook_name" "$hook_file"; then
+            log_info "Found hook to uninstall in: $hook_file"
+            
+            # Create temp file without the hook
+            local tmp_file=$(mktemp)
+            local in_section=0
 
-        while IFS= read -r line; do
-            if [[ $line == "# Begin $hook_name" ]]; then
-                in_section=1
-                continue
-            fi
-            if [[ $line == "# End $hook_name" ]]; then
-                in_section=0
-                continue
-            fi
-            if [ $in_section -eq 0 ]; then
-                echo "$line" >> "$tmp_file"
-                content_written=1
-            fi
-        done < "$hook_file"
+            while IFS= read -r line; do
+                if [[ $line == "# Begin $hook_name" ]]; then
+                    in_section=1
+                    continue
+                fi
+                if [[ $line == "# End $hook_name" ]]; then
+                    in_section=0
+                    continue
+                fi
+                if [ $in_section -eq 0 ]; then
+                    echo "$line" >> "$tmp_file"
+                fi
+            done < "$hook_file"
 
-        if [ $content_written -eq 1 ]; then
+            # Clean up empty lines at end
             sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp_file"
-            mv "$tmp_file" "$hook_file"
-            chmod +x "$hook_file"
+            
+            # If file has content, replace old file, otherwise remove it
+            if [ -s "$tmp_file" ]; then
+                log_info "Updating hook file with remaining hooks"
+                mv "$tmp_file" "$hook_file"
+                chmod +x "$hook_file"
+            else
+                log_info "Removing empty hook file"
+                rm -f "$hook_file"
+            fi
+            rm -f "$tmp_file"
             ((uninstalled++))
-        else
-            rm -f "$hook_file"
         fi
-        rm -f "$tmp_file"
     done
 
-    [ $uninstalled -gt 0 ] && log_success "✅ Hook $hook_name uninstalled successfully!"
-    return 0
+    log_info "Number of hooks uninstalled: $uninstalled"
+
+    if [ $uninstalled -gt 0 ]; then
+        log_info "Updating registry for $hook_name"
+        
+        if [ -f "$GITFLOW_PLUGINS_REGISTRY" ]; then
+            # Create temporary file for registry update
+            local temp_registry=$(mktemp)
+            
+            # Update the registry with the new status
+            sudo jq --arg name "$hook_name" \
+                '.plugins[$name].installed = "false"' \
+                "$GITFLOW_PLUGINS_REGISTRY" > "$temp_registry"
+
+            if [ $? -eq 0 ]; then
+                sudo mv "$temp_registry" "$GITFLOW_PLUGINS_REGISTRY"
+                sudo chmod 666 "$GITFLOW_PLUGINS_REGISTRY"
+                
+                # Force refresh registry
+                refresh_plugin_registry
+                
+                log_success "Hook $hook_name uninstalled successfully"
+                return 0
+            else
+                log_error "Failed to update registry"
+                rm -f "$temp_registry"
+                return 1
+            fi
+        fi
+    else
+        log_warning "No hooks found to uninstall for $hook_name"
+    fi
+
+    return 1
 }
 
 # Plugin Information
@@ -530,20 +652,24 @@ list_available_hooks() {
         return 1
     fi
 
-    local registry_content=$(cat "$GITFLOW_PLUGINS_REGISTRY")
-    
     # Display official plugins
     log_info "Official plugins:"
-    echo "$registry_content" | jq -r '.plugins | to_entries[] | 
+    jq -r '.plugins | to_entries[] | 
         select(.value.type == "official") | 
-        "  - \(.key) (\(.value.type))\n    version: \(.value.version)\n    description: \(.value.description)\n    author: \(.value.author)"'
+        "  - \(.key) (official) [\(if .value.installed == "false" then "Not Installed" else "Installed" end)]
+        version: \(.value.version)
+        description: \(.value.description)
+        author: \(.value.author)"' "$GITFLOW_PLUGINS_REGISTRY"
 
     # Display community plugins
     echo
     log_info "Community plugins:"
-    echo "$registry_content" | jq -r '.plugins | to_entries[] | 
+    jq -r '.plugins | to_entries[] | 
         select(.value.type == "community") | 
-        "  - \(.key) (\(.value.type))\n    version: \(.value.version)\n    description: \(.value.description)\n    author: \(.value.author)"'
+        "  - \(.key) (community) [\(if .value.installed == "false" then "Not Installed" else "Installed" end)]
+        version: \(.value.version)
+        description: \(.value.description)
+        author: \(.value.author)"' "$GITFLOW_PLUGINS_REGISTRY"
 }
 
 _display_plugin_info() {
