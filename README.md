@@ -1,91 +1,172 @@
-# Documentação do Projeto GitFlow
+# GitFlow - Gerenciador de Hooks
 
 ## Sobre o Projeto
 
-Este projeto visa fornecer um ambiente de desenvolvimento robusto e isolado para o framework de hooks GitFlow. Ele utiliza o Vagrant para criar uma máquina virtual (VM) com todas as dependências necessárias, garantindo um ambiente de desenvolvimento consistente para todos os colaboradores, independentemente de seus sistemas operacionais.
+O GitFlow é um gerenciador e instalador de hooks (também chamados de plugins), projetado para automatizar tarefas relacionadas a versionamento, documentação, CI/CD (Integração Contínua e Entrega Contínua) e outras atividades do fluxo de trabalho de desenvolvimento. O projeto utiliza uma abordagem modular, permitindo a criação e integração de hooks personalizados para atender às necessidades específicas de cada equipe ou projeto.
+
+Além disso, o GitFlow oferece um ambiente de desenvolvimento robusto e isolado, construído com o Vagrant, que garante consistência e compatibilidade entre diferentes sistemas operacionais. Isso facilita o desenvolvimento e teste de hooks sem interferir no ambiente local do desenvolvedor.
 
 ## Propósito
 
-O principal objetivo deste projeto é facilitar o desenvolvimento e teste de hooks GitFlow, permitindo que os desenvolvedores criem e modifiquem hooks sem afetar seus ambientes locais. O ambiente isolado também garante que todos os colaboradores trabalhem com a mesma configuração, evitando problemas de compatibilidade e garantindo a consistência dos testes.
+O objetivo principal do GitFlow é:
 
-## Ambiente de Desenvolvimento
+1. Fornecer um Gerenciador de Hooks:
 
-O ambiente de desenvolvimento pode ser configurado de três maneiras:
+    - Facilitar a instalação, remoção, ativação e desativação de hooks.
 
-### 1. Máquina Raiz
+    - Permitir a criação e uso de hooks personalizados.
 
-*   **Prós**:*
-    * Sem necessidade de software adicional (Vagrant, VirtualBox).
-    * Acesso direto aos arquivos do projeto.
-*   **Contras**:*
-    * Requer configuração manual do ambiente.
-    * Risco de conflitos com outras ferramentas.
-    * Dificuldade em reproduzir o ambiente em outras máquinas.
-*   **Instruções**:*
-    1. Clone o repositório para um diretório de sua escolha.
-    2. Instale as dependências necessárias (listadas na seção "Dependências").
-    3. Configure o GitFlow conforme as instruções do projeto.
+2. Ser um Repositório de Hooks:
 
-### 2. Vagrant
+    - Oferecer um catálogo de hooks prontos para uso.
 
-*   **Prós**:*
-    * Ambiente isolado e consistente.
-    * Fácil configuração e reprodução.
-    * Segurança contra danos ao sistema hospedeiro.
-*   **Contras**:*
-    * Requer instalação do Vagrant e VirtualBox.
-    * Pode ser mais lento que o desenvolvimento na máquina raiz.
-*   **Instruções**:*
-    1. Instale o Vagrant e o VirtualBox.
-    2. Clone o repositório.
-    3. Execute `vagrant up` para iniciar a máquina virtual.
-    4. Acesse a máquina virtual via SSH com `vagrant ssh`.
-    5. O diretório do projeto estará disponível em `/home/vagrant/gitflow`.
+    - Promover a extensibilidade do sistema com novos hooks.
 
-### 3. Instalação via .deb
+3. Garantir Consistência no Ambiente de Desenvolvimento:
 
-*   **Prós**:*
-    * Fácil instalação e remoção.
-    * Integração com o sistema operacional.
-*   **Contras**:*
-    * Requer a construção do pacote .deb.
-    * Menos flexível para desenvolvimento.
-*   **Instruções**:*
-    1. Construa o pacote .deb (consulte a seção "Construindo o Projeto").
-    2. Instale o pacote .deb com `sudo dpkg -i gitflow.deb`.
+    - Utilizar o Vagrant para criar uma máquina virtual (VM) com todas as dependências necessárias.
 
-## Dependências
+    - Isolar o ambiente de desenvolvimento, evitando conflitos e problemas de compatibilidade.
 
-As dependências do projeto variam dependendo do método de desenvolvimento escolhido. Consulte a documentação específica para cada método para obter a lista completa de dependências.
+4. Facilitar o Desenvolvimento Colaborativo:
 
-## Construindo o Projeto
+    - Prover um ambiente padronizado para todos os colaboradores.
 
-Para construir o projeto e gerar o pacote .deb, siga as instruções abaixo (dentro da VM Vagrant ou em um ambiente com as dependências instaladas):
+    - Simplificar o processo de teste e depuração de hooks.
 
-```bash
-cd ~/gitflow
-./scripts/build.sh
+## Funcionalidades Principais
+
+### Core do GitFlow
+
+- Gerenciador de Hooks:
+
+    - Instalação e remoção de hooks.
+
+    Ativação e desativação de hooks.
+
+- Repositório de Hooks:
+
+    - Catálogo de hooks disponíveis para download e uso.
+
+    - Suporte para hooks personalizados.
+
+- Ambiente de Desenvolvimento Isolado:
+
+    - Configuração simplificada com Vagrant.
+
+    - Compatibilidade multiplataforma (Windows, macOS, Linux).
+
+## Instruções de Uso do GitFlow Hook Manager
+
+O **GitFlow Hook Manager** é uma ferramenta para gerenciar hooks (ganchos) Git de forma modular. Ele permite instalar, desinstalar, reinstalar e configurar hooks personalizados para automatizar tarefas no fluxo de trabalho de desenvolvimento.
+
+### Como Usar
+
+#### Comandos Disponíveis
+
+O GitFlow Hook Manager suporta os seguintes comandos:
+
+1. **Instalar um Hook**:
+   ```bash
+   gitflow install <nome-do-hook>
+   ```
+   Exemplo:
+   ```bash
+   gitflow install doc-update-hook
+   ```
+
+2. **Desinstalar um Hook**:
+   ```bash
+   gitflow uninstall <nome-do-hook>
+   ```
+   Exemplo:
+   ```bash
+   gitflow uninstall pre-commit
+   ```
+
+3. **Reinstalar um Hook**:
+   ```bash
+   gitflow reinstall <nome-do-hook>
+   ```
+   Exemplo:
+   ```bash
+   gitflow reinstall doc-update-hook
+   ```
+
+4. **Listar Hooks Disponíveis**:
+   ```bash
+   gitflow list
+   ```
+
+5. **Configurar um Hook**:
+   ```bash
+   gitflow config <nome-do-hook>
+   ```
+   Exemplo:
+   ```bash
+   gitflow config doc-update-hook
+   ```
+
+6. **Exibir Ajuda**:
+   ```bash
+   gitflow --help
+   ```
+
+7. **Exibir Versão**:
+   ```bash
+   gitflow --version
+   ```
+
+---
+
+#### Opções Adicionais
+
+- **`--force`**:
+  Força a instalação ou desinstalação de um hook, mesmo que já esteja instalado ou não exista.
+  Exemplo:
+  ```bash
+  gitflow install doc-update-hook --force
+  ```
+
+- **`--help`**:
+  Exibe a mensagem de ajuda com todos os comandos e opções disponíveis.
+
+- **`--version`**:
+  Exibe a versão atual do GitFlow Hook Manager.
+
+---
+
+#### Requisitos
+
+- **Git**:
+  O GitFlow Hook Manager deve ser executado em um repositório Git válido. Certifique-se de que o diretório atual seja um repositório Git.
+
+- **Permissões**:
+  Alguns comandos podem exigir permissões de administrador (sudo) para instalar ou desinstalar hooks.
+
+---
+
+## Instalação do gerenciador via .deb
+
+[Download GitFlow Debian Package](https://github.com/GustavoRaposo/doc_automation/blob/feature/dev_env_impl/gitflow/build/gitflow_0.1.0_all.deb)
+
+```
+sudo apt-get update
+sudo dpkg -i gitflow_*_all.deb
+sudo apt-get install -f
 ```
 
+## Como utilizar
 
-2.0 Flash Experimental. Pode não funcionar conforme o esperado.
-Markdown
 
-# Documentação do Projeto GitFlow
 
-## Sobre o Projeto
+## Contribuindo
 
-Este projeto visa fornecer um ambiente de desenvolvimento robusto e isolado para o framework de hooks GitFlow. Ele utiliza o Vagrant para criar uma máquina virtual (VM) com todas as dependências necessárias, garantindo um ambiente de desenvolvimento consistente para todos os colaboradores, independentemente de seus sistemas operacionais.
-
-## Propósito
-
-O principal objetivo deste projeto é facilitar o desenvolvimento e teste de hooks GitFlow, permitindo que os desenvolvedores criem e modifiquem hooks sem afetar seus ambientes locais. O ambiente isolado também garante que todos os colaboradores trabalhem com a mesma configuração, evitando problemas de compatibilidade e garantindo a consistência dos testes.
-
-## Ambiente de Desenvolvimento
+### Ambiente de Desenvolvimento
 
 O ambiente de desenvolvimento pode ser configurado de duas maneiras:
 
-### 1. Root System
+#### 1. Root System
 
 *   **Prós**:*
     * Sem necessidade de software adicional (Vagrant, VirtualBox).
@@ -103,7 +184,7 @@ O ambiente de desenvolvimento pode ser configurado de duas maneiras:
     ./scripts/build.sh
 ```
 
-### 2. Vagrant (Recomendado)
+#### 2. Vagrant (Recomendado)
 
 *   **Prós**:*
     * Ambiente isolado e consistente.
@@ -175,7 +256,7 @@ Host gitflow-dev
    - Clique em Remote Explorer
    - Selecione "gitflow-dev" da lista de hosts
   
-### Recursos de Isolamento
+#### Recursos de Isolamento
 
 Este ambiente de desenvolvimento fornece:
 - ✅ Gerenciamento isolado de pacotes
@@ -189,30 +270,30 @@ Verifique o status do isolamento:
 check-isolation
 ```
 
-### Tarefas Comuns
+#### Tarefas Comuns
 
-#### Recriando o Ambiente
+##### Recriando o Ambiente
 ```bash
 vagrant destroy -f
 vagrant up
 ```
 
-#### Atualizando Dependências
+##### Atualizando Dependências
 ```bash
 vagrant ssh
 sudo apt-get update
 sudo apt-get upgrade
 ```
 
-#### Gerenciando a VM
+##### Gerenciando a VM
 - Iniciar VM: `vagrant up`
 - Parar VM: `vagrant halt`
 - Excluir VM: `vagrant destroy`
 - Recarregar VM: `vagrant reload`
 
-### Solução de Problemas
+#### Solução de Problemas
 
-#### Problemas de Permissão
+##### Problemas de Permissão
 Se encontrar problemas de permissão:
 ```bash
 # Dentro da VM
@@ -220,42 +301,32 @@ chmod +x scripts/*.sh
 sudo chown -R vagrant:vagrant ~/gitflow
 ```
 
-### Notas de Segurança
+#### Notas de Segurança
 
 - O ambiente de desenvolvimento está isolado do seu sistema host
 - Todo desenvolvimento deve ser feito dentro da VM
 - Não desabilite recursos de segurança no Vagrantfile
 - Mantenha VirtualBox e Vagrant atualizados
 
-## Simples instalação do gerenciador via .deb
-
-```
-sudo apt-get update
-cd build/
-sudo dpkg -i gitflow_*_all.deb
-sudo apt-get install -f
-cd ..
-```
-
-## Dependências
+#### Dependências
 
 As dependências do projeto variam dependendo do método de desenvolvimento escolhido. Consulte a documentação específica para cada método para obter a lista completa de dependências.
 
-## Fluxo de Desenvolvimento
+### Fluxo de Desenvolvimento
 
-### Compilando o Projeto
+#### Compilando o Projeto
 ```bash
 cd ~/gitflow
 ./scripts/build.sh
 ```
 
-### Executando Testes
+#### Executando Testes
 ```bash
 cd ~/gitflow
 ./scripts/test.sh
 ```
 
-### Criando Novos Plugins
+#### Criando Novos Plugins
 1. Crie o diretório do plugin:
 ```bash
 mkdir -p plugins/community/nome-do-seu-plugin
@@ -268,20 +339,17 @@ cp -r plugins/templates/basic/* plugins/community/nome-do-seu-plugin/
 
 3. Implemente a lógica do seu plugin no diretório events.
 
-## Troubleshooting
+### Troubleshooting
 
-### Falhas no Build
+#### Falhas no Build
 1. Verifique as permissões dos scripts
 2. Confirme se todas as dependências estão instaladas
 3. Garanta a estrutura correta de diretórios
 
-### Problemas de Conexão com VS Code
+#### Problemas de Conexão com VS Code
 1. Verifique a configuração SSH
 2. Verifique o redirecionamento de porta
 3. Regenere as chaves SSH se necessário
-
-## Contribuindo
-🚧🚧🚧
 
 ## Licença
 🚧🚧🚧
