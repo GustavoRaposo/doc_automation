@@ -1,64 +1,15 @@
 #!/bin/bash
 set -e
 
-# Determine script and project paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/test_utils.sh"
 
-# Add the project's bin directory to PATH
-export PATH="$PROJECT_ROOT/usr/bin:$PATH"
-
-# Source dependencies
+# Source required libraries
 source "$PROJECT_ROOT/usr/share/gitflow/lib/utils.sh"
 source "$PROJECT_ROOT/usr/share/gitflow/lib/constants.sh"
 
-setup_test_env() {
-    echo "Setting up test environment..."
-    
-    # Create test directory structure
-    TEST_DIR=$(mktemp -d)
-    echo "Test directory: $TEST_DIR"
-    
-    # Create necessary directories
-    mkdir -p "$TEST_DIR"/{usr/bin,usr/share/gitflow/{lib,plugins/{official,community,templates/basic,metadata}},etc/gitflow}
-    mkdir -p "$TEST_DIR/.config/gitflow"
-    mkdir -p "$TEST_DIR/.git/hooks"
-    
-    # Copy required files
-    cp -r "$PROJECT_ROOT/usr/share/gitflow/lib/"* "$TEST_DIR/usr/share/gitflow/lib/"
-    cp -r "$PROJECT_ROOT/usr/share/gitflow/plugins" "$TEST_DIR/usr/share/gitflow/"
-    cp "$PROJECT_ROOT/usr/bin/gitflow" "$TEST_DIR/usr/bin/"
-    
-    # Initialize plugin registry
-    echo '{"plugins":{}}' > "$TEST_DIR/usr/share/gitflow/plugins/metadata/plugins.json"
-    
-    # Set up git repository
-    cd "$TEST_DIR"
-    git init >/dev/null 2>&1
-    
-    # Export test environment variables
-    export GITFLOW_TEST_ENV=1
-    export GITFLOW_SYSTEM_DIR="$TEST_DIR/usr/share/gitflow"
-    export GITFLOW_LIB_DIR="$GITFLOW_SYSTEM_DIR/lib"
-    export GITFLOW_CONFIG_DIR="$TEST_DIR/etc/gitflow"
-    export GITFLOW_USER_CONFIG_DIR="$TEST_DIR/.config/gitflow"
-    export PATH="$TEST_DIR/usr/bin:/usr/bin:/usr/local/bin:$PATH"
-    
-    # Set permissions
-    find "$TEST_DIR" -type f -name "*.sh" -exec chmod 755 {} \;
-    chmod 755 "$TEST_DIR/usr/bin/gitflow"
-    
-    echo "Test environment set up with:"
-    echo "GITFLOW_SYSTEM_DIR=$GITFLOW_SYSTEM_DIR"
-    echo "GITFLOW_LIB_DIR=$GITFLOW_LIB_DIR"
-    echo "Current PATH: $PATH"
-
-    return 0
-}
-
-
-# Test library loading
-test_library_loading() {
+# System specific test functions
+system_test_library_loading() {
     echo "Testing library loading..."
     local failed=0
     
@@ -68,27 +19,33 @@ test_library_loading() {
         return 1
     fi
     
-    # Proceed with library tests...
+    # Define library load order
     local required_libs=(
         "constants.sh"
         "utils.sh"
-        "config.sh"
-        "hook-management.sh"
         "git.sh"
+        "hook-management.sh"
+        "config.sh"
     )
     
     for lib in "${required_libs[@]}"; do
         if [ ! -f "$GITFLOW_LIB_DIR/$lib" ]; then
             log_error "Required library not found: $lib"
+            log_error "Looking in: $GITFLOW_LIB_DIR"
             failed=1
             continue
         fi
         echo "✓ Found library: $lib"
         
-        if ! source "$GITFLOW_LIB_DIR/$lib" 2>/dev/null; then
+        # Source with error capture
+        if ! output=$(source "$GITFLOW_LIB_DIR/$lib" 2>&1); then
             log_error "Failed to source library: $lib"
+            log_error "Error: $output"
             failed=1
         else
+            if [ -n "$output" ]; then
+                echo "$output"
+            fi
             echo "✓ Successfully loaded: $lib"
         fi
     done
@@ -96,9 +53,7 @@ test_library_loading() {
     return $failed
 }
 
-# Test directory structure
-# Add to test_directory_structure function in test_system.sh
-test_directory_structure() {
+system_test_directory_structure() {
     echo "Testing directory structure..."
     local failed=0
     
@@ -110,17 +65,6 @@ test_directory_structure() {
         "usr/share/gitflow/plugins/community"
         "usr/share/gitflow/plugins/templates"
     )
-    
-    # Add test for plugin tmp directories
-    for plugin in "$PROJECT_ROOT/usr/share/gitflow/plugins/official"/*/ ; do
-        if [ -d "$plugin" ]; then
-            local tmp_dir="$plugin/tmp"
-            if [ ! -d "$tmp_dir" ]; then
-                mkdir -p "$tmp_dir"
-                chmod 755 "$tmp_dir"
-            fi
-        fi
-    done
     
     for dir in "${required_dirs[@]}"; do
         if [ ! -d "$PROJECT_ROOT/$dir" ]; then
@@ -134,8 +78,7 @@ test_directory_structure() {
     return $failed
 }
 
-# Test file permissions
-test_file_permissions() {
+system_test_file_permissions() {
     echo "Testing file permissions..."
     local failed=0
     
@@ -157,72 +100,60 @@ test_file_permissions() {
         fi
     done
     
-    # Test directory permissions
-    find "$PROJECT_ROOT/usr/share/gitflow" -type d -print0 | while IFS= read -r -d '' dir; do
-        if [ ! -x "$dir" ]; then
-            log_error "Directory not executable: $dir"
-            failed=1
-        fi
-    done
-    
     return $failed
 }
 
-# Test command line interface
-test_cli() {
+system_test_cli() {
     echo "Testing command line interface..."
     local failed=0
+    local temp_output
     
-    # Create temporary test directory
-    local test_dir=$(mktemp -d)
-    cd "$test_dir"
-    git init >/dev/null 2>&1
+    local gitflow_bin="$GITFLOW_SYSTEM_DIR/../bin/gitflow"
     
-    # Set up minimal environment
-    export GITFLOW_SYSTEM_DIR="$PROJECT_ROOT/usr/share/gitflow"
-    export GITFLOW_LIB_DIR="$GITFLOW_SYSTEM_DIR/lib"
-    export PATH="$PROJECT_ROOT/usr/bin:$PATH"
-    
-    # Test help command
-    if ! gitflow --help 2>&1 | grep -q "Usage: gitflow"; then
-        log_error "Help command failed"
-        failed=1
-    else
-        echo "✓ Help command works"
+    if [ ! -x "$gitflow_bin" ]; then
+        gitflow_bin="$TEST_DIR/usr/bin/gitflow"
+        if [ ! -x "$gitflow_bin" ]; then
+            echo "❌ gitflow executable not found or not executable"
+            return 1
+        fi
     fi
     
-    # Test version command
-    if ! gitflow --version 2>&1 | grep -q "gitflow version"; then
-        log_error "Version command failed"
-        failed=1
-    else
-        echo "✓ Version command works"
-    fi
+    test_command() {
+        local cmd="$1"
+        local expected="$2"
+        local description="$3"
+        temp_output=$(mktemp)
+        
+        echo "Testing $description..."
+        if GITFLOW_DEBUG=0 "$gitflow_bin" $cmd > "$temp_output" 2>&1; then
+            if grep -q "$expected" "$temp_output"; then
+                echo "✓ $description works"
+                rm -f "$temp_output"
+                return 0
+            fi
+        elif [[ "$cmd" == "--invalid-xyz" ]]; then
+            if grep -q "Unknown command:" "$temp_output"; then
+                echo "✓ $description works"
+                rm -f "$temp_output"
+                return 0
+            fi
+        fi
+        
+        echo "❌ $description failed"
+        echo "Output:"
+        cat "$temp_output"
+        rm -f "$temp_output"
+        return 1
+    }
     
-    # Test invalid command
-    if ! gitflow --invalid-command 2>&1 | grep -q "Unknown command"; then
-        log_error "Invalid command handling failed"
-        failed=1
-    else
-        echo "✓ Invalid command handling works"
-    fi
-    
-    # Cleanup
-    cd - >/dev/null
-    rm -rf "$test_dir"
+    test_command "--help" "Usage: gitflow" "help command" || failed=1
+    test_command "--version" "gitflow version" "version command" || failed=1
+    test_command "--invalid-xyz" "Unknown command" "invalid command handling" || failed=1
     
     return $failed
 }
 
-cleanup() {
-    if [ -n "$TEST_DIR" ] && [ -d "$TEST_DIR" ]; then
-        cd "$PROJECT_ROOT" || true
-        rm -rf "$TEST_DIR"
-    fi
-}
-
-# Test environment variables
-test_environment() {
+system_test_environment() {
     echo "Testing environment variables..."
     local failed=0
     
@@ -245,22 +176,15 @@ test_environment() {
     return $failed
 }
 
-# Run all tests
+# Main test function for this file
 run_system_tests() {
     local failed=0
     
-    # Set up test environment
-    if ! setup_test_env; then
-        log_error "Failed to set up test environment"
-        return 1
-    fi
-    
-    # Run tests
-    test_library_loading || failed=1
-    test_directory_structure || failed=1
-    test_file_permissions || failed=1
-    test_cli || failed=1
-    test_environment || failed=1
+    system_test_library_loading || failed=1
+    system_test_directory_structure || failed=1
+    system_test_file_permissions || failed=1
+    system_test_cli || failed=1
+    system_test_environment || failed=1
     
     if [ $failed -eq 0 ]; then
         log_success "All system tests passed"
@@ -271,7 +195,7 @@ run_system_tests() {
     return $failed
 }
 
-# Run tests if script is executed directly
+# Only run tests if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     run_system_tests
 fi

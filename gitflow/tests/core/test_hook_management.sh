@@ -2,119 +2,128 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/test_utils.sh"
 
-# Source dependencies after ensuring GITFLOW_LIB_DIR is set
-if [ -z "$GITFLOW_LIB_DIR" ]; then
-    if [ -d "$PROJECT_ROOT/usr/share/gitflow/lib" ]; then
-        export GITFLOW_LIB_DIR="$PROJECT_ROOT/usr/share/gitflow/lib"
-    else
-        echo "❌ Cannot find gitflow library directory"
-        exit 1
-    fi
-fi
-
-# Source required libraries
-source "$GITFLOW_LIB_DIR/utils.sh"
+# Source libraries in correct order
 source "$GITFLOW_LIB_DIR/constants.sh"
+source "$GITFLOW_LIB_DIR/utils.sh"
+source "$GITFLOW_LIB_DIR/git.sh"
 source "$GITFLOW_LIB_DIR/hook-management.sh"
 
 # Test hook installation
-test_install_hook() {
+hook_test_install() {
     echo "Testing hook installation..."
     
-    # Initialize test environment
-    local TEST_DIR=$(mktemp -d)
-    cd "$TEST_DIR"
+    # Create and move to test git repository
+    local test_repo="$TEST_DIR/repo"
+    mkdir -p "$test_repo"
+    cd "$test_repo" || exit 1
     git init
     
-    local hook_dir="$TEST_DIR/.git/hooks"
+    # Define test-specific paths
+    local hooks_dir="$test_repo/.git/hooks"
     local plugins_dir="$TEST_DIR/usr/share/gitflow/plugins"
+    local test_plugin_dir="$plugins_dir/official/version-update-hook"
     
-    # Set up plugin structure
-    mkdir -p "$plugins_dir/official/version-update-hook/events/pre-commit"
-    cp -r "$PROJECT_ROOT/usr/share/gitflow/plugins/official/version-update-hook"/* \
-        "$plugins_dir/official/version-update-hook/"
+    # Clean and recreate plugin directory structure
+    rm -rf "$test_plugin_dir"
+    mkdir -p "$test_plugin_dir/events/pre-commit"
+    mkdir -p "$test_plugin_dir/events/post-commit"
+    mkdir -p "$test_plugin_dir/lib"
     
-    # Override environment variables for test
-    export GITFLOW_OFFICIAL_PLUGINS_DIR="$plugins_dir/official"
+    # Create test hook scripts
+    cat > "$test_plugin_dir/events/pre-commit/script.sh" <<'EOF'
+#!/bin/bash
+echo "Test pre-commit hook"
+EOF
+    chmod 755 "$test_plugin_dir/events/pre-commit/script.sh"
+    
+    cat > "$test_plugin_dir/events/post-commit/script.sh" <<'EOF'
+#!/bin/bash
+echo "Test post-commit hook"
+EOF
+    chmod 755 "$test_plugin_dir/events/post-commit/script.sh"
+    
+    # Create metadata
+    cat > "$test_plugin_dir/metadata.json" <<'EOF'
+{
+    "name": "version-update-hook",
+    "version": "1.0.0",
+    "description": "Test hook for version updates",
+    "author": "Test Author",
+    "events": ["pre-commit", "post-commit"]
+}
+EOF
+    chmod 644 "$test_plugin_dir/metadata.json"
+    
+    # Initialize plugin registry
+    local registry_dir="$plugins_dir/metadata"
+    mkdir -p "$registry_dir"
+    echo '{"plugins":{}}' > "$registry_dir/plugins.json"
+    chmod 666 "$registry_dir/plugins.json"
+    
+    # Set environment for test
+    export GITFLOW_TEST_ENV=1
     export GITFLOW_SYSTEM_DIR="$TEST_DIR/usr/share/gitflow"
+    export GITFLOW_PLUGINS_DIR="$plugins_dir"
+    export GITFLOW_PLUGINS_REGISTRY="$registry_dir/plugins.json"
     
-    # Attempt to install the test hook
+    # Install the hook
     if ! install_specific_hook "version-update-hook"; then
         log_error "Hook installation failed"
-        cd - >/dev/null
-        rm -rf "$TEST_DIR"
         return 1
     fi
     
-    # Verify hook files were created
-    if [ ! -f "$hook_dir/pre-commit" ]; then
-        log_error "pre-commit hook not created"
-        cd - >/dev/null
-        rm -rf "$TEST_DIR"
-        return 1
-    fi
+    # Verify hook installation
+    for hook in "pre-commit" "post-commit"; do
+        if [ ! -f "$hooks_dir/$hook" ]; then
+            log_error "Hook file not created: $hook"
+            return 1
+        fi
+        if [ ! -x "$hooks_dir/$hook" ]; then
+            log_error "Hook not executable: $hook"
+            return 1
+        fi
+        if ! grep -q "Test $hook hook" "$hooks_dir/$hook"; then
+            log_error "Hook content verification failed for $hook"
+            return 1
+        fi
+    done
     
-    # Verify hook permissions
-    if [ ! -x "$hook_dir/pre-commit" ]; then
-        log_error "pre-commit hook not executable"
-        cd - >/dev/null
-        rm -rf "$TEST_DIR"
-        return 1
-    fi
-    
-    cd - >/dev/null
-    rm -rf "$TEST_DIR"
     return 0
 }
 
 # Test hook uninstallation
-test_uninstall_hook() {
+hook_test_uninstall() {
     echo "Testing hook uninstallation..."
     
-    # Initialize test environment
-    local TEST_DIR=$(mktemp -d)
-    cd "$TEST_DIR"
-    git init
+    # Use the same test repository
+    local test_repo="$TEST_DIR/repo"
+    cd "$test_repo" || exit 1
     
-    local hook_dir="$TEST_DIR/.git/hooks"
-    local plugins_dir="$TEST_DIR/usr/share/gitflow/plugins"
-    
-    # Set up plugin structure
-    mkdir -p "$plugins_dir/official/version-update-hook/events/pre-commit"
-    cp -r "$PROJECT_ROOT/usr/share/gitflow/plugins/official/version-update-hook"/* \
-        "$plugins_dir/official/version-update-hook/"
-    
-    # Override environment variables for test
-    export GITFLOW_OFFICIAL_PLUGINS_DIR="$plugins_dir/official"
+    # Set environment for test
+    export GITFLOW_TEST_ENV=1
     export GITFLOW_SYSTEM_DIR="$TEST_DIR/usr/share/gitflow"
     
-    # Install and then uninstall a hook
-    install_specific_hook "version-update-hook" || {
+    # First install hook
+    if ! install_specific_hook "version-update-hook"; then
         log_error "Hook installation failed"
-        cd - >/dev/null
-        rm -rf "$TEST_DIR"
         return 1
-    }
-
+    fi
+    
+    # Then uninstall
     if ! uninstall_hook "version-update-hook"; then
         log_error "Hook uninstallation failed"
-        cd - >/dev/null
-        rm -rf "$TEST_DIR"
         return 1
     fi
     
-    # Verify hook was properly removed
-    if [ -f "$hook_dir/pre-commit" ] && grep -q "version-update-hook" "$hook_dir/pre-commit"; then
+    # Verify uninstallation
+    local hooks_dir="$test_repo/.git/hooks"
+    if [ -f "$hooks_dir/pre-commit" ] && grep -q "version-update-hook" "$hooks_dir/pre-commit"; then
         log_error "Hook not properly uninstalled"
-        cd - >/dev/null
-        rm -rf "$TEST_DIR"
         return 1
     fi
     
-    cd - >/dev/null
-    rm -rf "$TEST_DIR"
     return 0
 }
 
@@ -122,8 +131,12 @@ test_uninstall_hook() {
 run_hook_tests() {
     local failed=0
     
-    test_install_hook || failed=1
-    test_uninstall_hook || failed=1
+    # Ensure we're in a clean state
+    setup_test_env
+    
+    # Run tests
+    hook_test_install || failed=1
+    hook_test_uninstall || failed=1
     
     if [ $failed -eq 0 ]; then
         log_success "All hook tests passed"

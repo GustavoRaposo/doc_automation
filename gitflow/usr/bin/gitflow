@@ -1,43 +1,89 @@
 #!/bin/bash
 set -e
 
-# Ensure GITFLOW_SYSTEM_DIR is set
-if [ -z "$GITFLOW_SYSTEM_DIR" ]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [ -d "$SCRIPT_DIR/../share/gitflow" ]; then
-        GITFLOW_SYSTEM_DIR="$SCRIPT_DIR/../share/gitflow"
+# Debug mode with controlled output
+if [ "${GITFLOW_DEBUG:-0}" = "1" ]; then
+    set -x
+    export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
+fi
+
+# Detect system paths and environment
+detect_system_paths() {
+    local script_path="$(readlink -f "$0")"
+    local script_dir="$(dirname "$script_path")"
+    local system_dir=""
+    local config_dir=""
+
+    # Test environment takes precedence
+    if [ -n "$GITFLOW_TEST_ENV" ]; then
+        system_dir="$GITFLOW_TEST_DIR/usr/share/gitflow"
+        config_dir="$GITFLOW_TEST_DIR/etc/gitflow"
+    # Build environment check
+    elif [ -n "$GITFLOW_WORK_DIR" ]; then
+        system_dir="$GITFLOW_WORK_DIR/usr/share/gitflow"
+        config_dir="$GITFLOW_WORK_DIR/etc/gitflow"
+    # System installation
+    elif [ -d "/usr/share/gitflow" ]; then
+        system_dir="/usr/share/gitflow"
+        config_dir="/etc/gitflow"
+    # Development environment
+    elif [ -d "$script_dir/../share/gitflow" ]; then
+        system_dir="$script_dir/../share/gitflow"
+        config_dir="$script_dir/../etc/gitflow"
     else
-        echo "❌ Error: GITFLOW_SYSTEM_DIR not set and unable to locate gitflow directory"
+        echo "❌ Error: Unable to locate gitflow installation" >&2
         exit 1
     fi
-fi
 
-# Set and validate library directory
-GITFLOW_LIB_DIR="$GITFLOW_SYSTEM_DIR/lib"
-if [ ! -d "$GITFLOW_LIB_DIR" ]; then
-    echo "❌ Error: Required library directory not found: $GITFLOW_LIB_DIR"
-    exit 1
-fi
+    # Export detected paths
+    export GITFLOW_SYSTEM_DIR="$system_dir"
+    export GITFLOW_LIB_DIR="$system_dir/lib"
+    export GITFLOW_CONFIG_DIR="$config_dir"
+    export GITFLOW_USER_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gitflow"
+}
 
-# Source required libraries with error checking
+# Initialize system paths
+detect_system_paths
+
+# Source required library files with improved error handling
+source_library() {
+    local lib="$1"
+    local lib_path="$GITFLOW_LIB_DIR/$lib"
+    
+    if [ ! -f "$lib_path" ]; then
+        echo "❌ Library not found: $lib" >&2
+        echo "Expected path: $lib_path" >&2
+        return 1
+    fi
+
+    if ! source "$lib_path" 2>/dev/null; then
+        echo "❌ Failed to source $lib" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Required libraries in load order
 declare -a required_libs=(
-    "constants.sh"
-    "utils.sh"
-    "config.sh"
-    "hook-management.sh"
-    "git.sh"
+    "constants.sh"    # Must be first for path definitions
+    "utils.sh"        # Logging and utility functions
+    "config.sh"       # Configuration management
+    "hook-management.sh"  # Hook management functions
+    "git.sh"         # Git-specific utilities
 )
 
+# Source each library
 for lib in "${required_libs[@]}"; do
-    if [ ! -f "$GITFLOW_LIB_DIR/$lib" ]; then
-        echo "❌ Error: Required library not found: $lib"
+    if ! source_library "$lib"; then
+        echo "❌ Fatal: Failed to load required library: $lib" >&2
         exit 1
     fi
-    source "$GITFLOW_LIB_DIR/$lib"
 done
 
-# Ensure config directory exists
-mkdir -p "$GITFLOW_USER_CONFIG_DIR"
+# Ensure config directories exist with proper permissions
+mkdir -p "$GITFLOW_USER_CONFIG_DIR" 2>/dev/null || true
+chmod 700 "$GITFLOW_USER_CONFIG_DIR" 2>/dev/null || true
 
 # Check if we're in a git repository for git-specific commands
 check_git_repo() {
@@ -111,7 +157,7 @@ Options:
 EOF
 }
 
-# Hook management functions
+# Hook management functions with improved error handling
 handle_hook_command() {
     local subcommand=$1
     shift
@@ -120,19 +166,28 @@ handle_hook_command() {
         "install")
             [ -z "$1" ] && { log_error "Hook name required"; show_hook_help; exit 1; }
             check_git_repo
-            install_specific_hook "$1"
+            if ! install_specific_hook "$1"; then
+                log_error "Failed to install hook: $1"
+                exit 1
+            fi
             ;;
         "uninstall")
             [ -z "$1" ] && { log_error "Hook name required"; show_hook_help; exit 1; }
             check_git_repo
-            uninstall_hook "$1"
+            if ! uninstall_hook "$1"; then
+                log_error "Failed to uninstall hook: $1"
+                exit 1
+            fi
             ;;
         "list")
             list_available_hooks
             ;;
         "update")
             check_git_repo
-            update_installed_hooks "$@"
+            if ! update_installed_hooks "$@"; then
+                log_error "Failed to update hooks"
+                exit 1
+            fi
             ;;
         "status")
             check_git_repo
@@ -149,7 +204,7 @@ handle_hook_command() {
     esac
 }
 
-# Plugin management functions
+# Plugin management functions with improved error handling
 handle_plugin_command() {
     local subcommand=$1
     shift
@@ -157,20 +212,32 @@ handle_plugin_command() {
     case "$subcommand" in
         "install")
             [ -z "$1" ] && { log_error "Plugin name required"; show_plugin_help; exit 1; }
-            install_plugin "$1"
+            if ! install_plugin "$1"; then
+                log_error "Failed to install plugin: $1"
+                exit 1
+            fi
             ;;
         "uninstall")
             [ -z "$1" ] && { log_error "Plugin name required"; show_plugin_help; exit 1; }
-            uninstall_plugin "$1"
+            if ! uninstall_plugin "$1"; then
+                log_error "Failed to uninstall plugin: $1"
+                exit 1
+            fi
             ;;
         "list")
             list_installed_plugins
             ;;
         "update")
-            update_plugins "$@"
+            if ! update_plugins "$@"; then
+                log_error "Failed to update plugins"
+                exit 1
+            fi
             ;;
         "config")
-            configure_plugin "$@"
+            if ! configure_plugin "$@"; then
+                log_error "Failed to configure plugin"
+                exit 1
+            fi
             ;;
         "--help")
             show_plugin_help
@@ -183,7 +250,7 @@ handle_plugin_command() {
     esac
 }
 
-# Configuration management functions
+# Configuration management functions with improved error handling
 handle_config_command() {
     local subcommand=$1
     shift
@@ -199,15 +266,19 @@ handle_config_command() {
             fi
             ;;
         "edit")
-            if [ -z "$EDITOR" ]; then
-                EDITOR=vi
+            EDITOR=${EDITOR:-${VISUAL:-vi}}
+            if ! $EDITOR "$GITFLOW_USER_CONFIG"; then
+                log_error "Failed to edit configuration"
+                exit 1
             fi
-            $EDITOR "$GITFLOW_USER_CONFIG"
             ;;
         "reset")
             read -p "⚠️  Are you sure you want to reset configuration? (y/N) " confirm
             if [[ $confirm =~ ^[Yy]$ ]]; then
-                rm -f "$GITFLOW_USER_CONFIG"
+                if ! rm -f "$GITFLOW_USER_CONFIG"; then
+                    log_error "Failed to reset configuration"
+                    exit 1
+                fi
                 log_success "Configuration reset successfully"
             else
                 echo "Reset cancelled"
@@ -219,18 +290,27 @@ handle_config_command() {
                 show_config_help
                 exit 1
             fi
-            key="$1"
-            value="$2"
+            local key="$1"
+            local value="$2"
             if [ -z "$value" ]; then
                 read -p "Enter value for $key: " value
             fi
             
-            mkdir -p "$(dirname "$GITFLOW_USER_CONFIG")"
+            if ! mkdir -p "$(dirname "$GITFLOW_USER_CONFIG")"; then
+                log_error "Failed to create configuration directory"
+                exit 1
+            fi
             
-            if grep -q "^${key}=" "$GITFLOW_USER_CONFIG" 2>/dev/null; then
-                sed -i "s|^${key}=.*|${key}=${value}|" "$GITFLOW_USER_CONFIG"
+            if [ -f "$GITFLOW_USER_CONFIG" ] && grep -q "^${key}=" "$GITFLOW_USER_CONFIG"; then
+                if ! sed -i "s|^${key}=.*|${key}=${value}|" "$GITFLOW_USER_CONFIG"; then
+                    log_error "Failed to update configuration"
+                    exit 1
+                fi
             else
-                echo "${key}=${value}" >> "$GITFLOW_USER_CONFIG"
+                if ! echo "${key}=${value}" >> "$GITFLOW_USER_CONFIG"; then
+                    log_error "Failed to write configuration"
+                    exit 1
+                fi
             fi
             log_success "Configuration updated: ${key}=${value}"
             ;;
